@@ -1,219 +1,275 @@
 ---
 name: qa
 description: >
-  Full QA workflow for the teetime app: build and run the app, drive the browser to test every UI control,
-  cross-check data against live booking sites, document findings, present them to the user, spawn agents
-  for approved changes, review diffs with risk annotations, and merge to main when clean.
+  Full QA workflow for the tokenBoardCreator web UI: build and run the app, drive the browser
+  through every form control and flow, verify PDF generation, document findings, spawn agents
+  for approved fixes, review diffs with risk annotations, and merge to main when clean.
   Triggers on "qa", "run qa", "qa workflow", "test the app", "quality check", or /qa.
-allowed-tools: Bash, Write, Read, Task, AskUserQuestion, mcp__chrome-devtools__navigate_page, mcp__chrome-devtools__take_screenshot, mcp__chrome-devtools__click, mcp__chrome-devtools__fill, mcp__chrome-devtools__select_page, mcp__chrome-devtools__list_pages, mcp__chrome-devtools__new_page, mcp__chrome-devtools__evaluate_script, mcp__chrome-devtools__wait_for, mcp__chrome-devtools__get_network_request, mcp__chrome-devtools__list_network_requests, mcp__chrome-devtools__fill_form, mcp__chrome-devtools__hover, mcp__chrome-devtools__press_key, mcp__chrome-devtools__close_page
+allowed-tools: Bash, Write, Read, Task, AskUserQuestion, mcp__chrome-devtools__navigate_page, mcp__chrome-devtools__take_screenshot, mcp__chrome-devtools__take_snapshot, mcp__chrome-devtools__click, mcp__chrome-devtools__fill, mcp__chrome-devtools__select_page, mcp__chrome-devtools__list_pages, mcp__chrome-devtools__new_page, mcp__chrome-devtools__list_network_requests, mcp__chrome-devtools__evaluate_script, mcp__chrome-devtools__wait_for, mcp__chrome-devtools__close_page
 ---
 
-# QA Workflow
+# QA Workflow — tokenBoardCreator
 
-End-to-end QA for the teetime web UI. Runs the app, drives the browser against every UI control, cross-checks
-tee time data against live booking sites, documents findings, iterates changes through agents with diff review,
-and merges to main when no Major risks remain.
+End-to-end QA for the tokenBoardCreator web UI. Builds and runs the app, drives Chrome through
+every form control, validates preview rendering and PDF download, documents all findings,
+iterates fixes through agents with diff review, and merges to main when no Major risks remain.
 
 ## Arguments
 
-- **location** (required): location to pass to `--location` (e.g. `"Palo Alto, CA"`)
-- **date** (optional): date in `YYYY-MM-DD` format. Defaults to tomorrow.
-- **radius** (optional): search radius in miles. Defaults to `25`.
-- **players** (optional): number of players. Defaults to `2`.
-- **holes** (optional): 9 or 18. Defaults to `18`.
-- **from** (optional): earliest time filter `HH:MM`. Defaults to `08:00`.
-- **to** (optional): latest time filter `HH:MM`. Defaults to `14:00`.
-
-Example invocation:
-```
-/qa location="Palo Alto, CA" date=2026-06-10 players=2 from=08:00 to=14:00
-```
+None required. The app always runs on `localhost:8080`.
 
 ---
 
 ## Phase 1 — Build and Run
 
-### Step 1.1 — Resolve arguments
-
-Parse the invocation for the arguments above. If `location` is missing, ask:
-```
-AskUserQuestion: "What location should I use for the QA run? (e.g. 'Palo Alto, CA')"
-```
-
-Set defaults for any omitted arguments.
-
-### Step 1.2 — Build
+### Step 1.1 — Build
 
 ```bash
-cd /home/owner/GolandProjects/teetime && go build .
+cd /home/owner/GolandProjects/tokenBoardCreator && go build .
 ```
 
-If the build fails, report the error and stop. Do not proceed to run.
+If the build fails, report the error and stop.
 
-### Step 1.3 — Run the app in web mode
-
-Run the app in the background with `--web` and all QA arguments:
+### Step 1.2 — Run in web mode
 
 ```bash
-cd /home/owner/GolandProjects/teetime && ./teetime \
-  --location "<location>" \
-  --date <date> \
-  --radius <radius> \
-  --players <players> \
-  --holes <holes> \
-  --from <from> \
-  --to <to> \
-  --web &
+cd /home/owner/GolandProjects/tokenBoardCreator && ./tokenBoardCreator --web --port 8080 &
+sleep 1
 ```
 
-Capture stdout. Watch for the line:
+Watch for:
 ```
-Serving results at http://localhost:<PORT>  (Ctrl+C to exit)
+Token Board Creator listening on http://localhost:8080
 ```
 
-Extract the URL (e.g. `http://localhost:54321`). If it does not appear within 120 seconds, report a timeout and stop.
+If it does not appear within 10 seconds, report a timeout and stop.
 
-### Step 1.4 — Open the browser
+### Step 1.3 — Open the browser
 
-Use `mcp__chrome-devtools__navigate_page` to open the extracted URL. If no page exists, use `mcp__chrome-devtools__new_page` first.
+Use `mcp__chrome-devtools__new_page` with URL `http://localhost:8080`. If a page already exists,
+use `mcp__chrome-devtools__navigate_page` instead.
 
-Take a screenshot with `mcp__chrome-devtools__take_screenshot` and note the initial state.
+Take a screenshot and note the initial state.
 
 ---
 
 ## Phase 2 — UI Testing
 
-Work through each control listed below. For each test, take a screenshot before and after the interaction and record the result (pass / fail / note).
+Work through each test below in order. For each test, take a screenshot after the interaction
+and record: **PASS**, **FAIL**, or **NOTE** with a one-line observation.
 
-### 2.1 — Filter bar pre-population
+Use `mcp__chrome-devtools__take_snapshot` to get element UIDs before filling or clicking.
 
-Verify the filter bar is pre-populated from the CLI flags used in Step 1.3:
+---
 
-| Control | Expected value |
-|---------|----------------|
-| `#f-from` (From time) | `<from>` argument (e.g. `08:00`) |
-| `#f-to` (To time) | `<to>` argument (e.g. `14:00`) |
-| `#f-spots` (Min spots) | `<players>` argument (e.g. `2`) |
-| `#f-date` (Date) | `<date>` argument |
+### 2.1 — Form loads with correct defaults
 
-Use `mcp__chrome-devtools__evaluate_script` to read the actual values:
+Navigate to `http://localhost:8080/`. Verify:
+
+| Field | Expected default |
+|---|---|
+| Child Name | empty |
+| Reward Text | empty |
+| Number of Tokens | `5` |
+| Token Style | `Star` |
+| Theme | `Default` |
+| Page Size | `Letter` |
+| Custom Title | empty (placeholder: "I am working for:") |
+
+Use `mcp__chrome-devtools__evaluate_script` to read values:
 ```javascript
 ({
-  from:    document.getElementById('f-from').value,
-  to:      document.getElementById('f-to').value,
-  spots:   document.getElementById('f-spots').value,
-  date:    document.getElementById('f-date').value
+  name:       document.querySelector('[name=name]').value,
+  reward:     document.querySelector('[name=reward]').value,
+  tokens:     document.querySelector('[name=tokens]').value,
+  tokenStyle: document.querySelector('[name=token_style]').value,
+  theme:      document.querySelector('[name=theme]').value,
+  pageSize:   document.querySelector('[name=page_size]').value,
+  title:      document.querySelector('[name=title]').value,
 })
 ```
 
 Record PASS if all match, FAIL with specifics if any diverge.
 
-### 2.2 — Expand / collapse courses
+---
 
-For a course row that has tee times (has class `has-times`):
-1. Click the row — verify tee time rows appear beneath it (class `teetime-row`).
-2. Click again — verify the tee time rows disappear.
-3. Expand two courses simultaneously — verify both sets of rows are visible at the same time.
+### 2.2 — Required field: empty reward text
 
-Use `evaluate_script` to count visible `teetime-row` elements before and after each click.
+Without filling any fields, click **Preview**. Verify:
+- The browser blocks submission and shows a "Please fill out this field." tooltip on Reward Text.
+- The page does NOT navigate to `/preview`.
 
-### 2.3 — From / To time filter
+Record PASS if the form stays on `/` with the validation tooltip visible.
 
-1. Clear the From field and set it to `12:00`. Verify tee times before noon disappear.
-2. Clear the To field and set it to `10:00`. Verify tee times after 10am disappear.
-3. Set From and To both to the same value. Verify only exact-match times remain (or zero if none).
-4. Clear both fields. Verify all tee times return.
+---
 
-### 2.4 — Min spots filter
+### 2.3 — Token count: below minimum
 
-Step through each option in `#f-spots` (1, 2, 3, 4). For each:
-- Verify visible tee time rows all have `players >= selected value`.
-- Use `evaluate_script` to confirm.
+Fill Reward Text with any value. Set Number of Tokens to `2`. Click **Preview**. Verify:
+- The browser blocks submission and shows "Value must be greater than or equal to 3."
+- The page does NOT navigate.
 
-### 2.5 — Sort
+---
 
-Test each option in `#f-sort`:
-- **Distance**: course rows should appear in ascending distance order.
-- **Earliest time**: courses with the earliest first tee time should appear first.
-- **Lowest price**: courses with the lowest minimum price should appear first.
+### 2.4 — Token count: above maximum
 
-For each sort, use `evaluate_script` to extract the rendered order and verify it is correct.
+Set Number of Tokens to `11`. Click **Preview**. Verify:
+- The browser blocks submission and shows "Value must be less than or equal to 10."
+- The page does NOT navigate.
 
-### 2.6 — Hide unavailable toggle
+---
 
-1. Note the total number of rows (including no-time rows) before toggling.
-2. Check `#f-hide`. Verify all `no-time` rows disappear.
-3. Uncheck `#f-hide`. Verify they return.
+### 2.5 — Happy path: preview renders all fields
 
-### 2.7 — Date change
+Fill the form:
+- Child Name: `Alex`
+- Reward Text: `iPad time`
+- Tokens: `5`
+- Token Style: `Star`
+- Theme: `Default`
+- Page Size: `Letter`
+- Custom Title: *(leave empty)*
 
-1. Change the date picker to tomorrow + 1 (two days from today).
-2. Verify a loading spinner/row appears immediately.
-3. Wait for new results to load (up to 60 seconds). Verify the header date updates and the table re-renders with new data.
-4. Change back to the original date. Verify results reload.
+Click **Preview**. Verify the preview page shows:
+- Title "I am working for:" in the header left
+- "iPad time" in the header right
+- Name band with "Alex"
+- Exactly 5 token slots
+- Footer with dashed border
+- **Download PDF** button
+- **← Back to form** link
 
-If the fetch errors, record the error message shown in the table.
+Record PASS if all elements are present and correctly placed.
 
-### 2.8 — Book links
+---
 
-For each expanded course row, verify the "Book →" link:
-- Is present for tee times that have a `bookURL`.
-- Opens to the correct booking provider (Chronogolf or ForeUP URL pattern).
-- Has `target="_blank"`.
+### 2.6 — Happy path: Download PDF from preview
 
-Use `evaluate_script` to check `href` values without actually navigating away:
+From the preview page (after 2.5), click **Download PDF**. Verify:
+- The page does NOT navigate away (stays on `/preview`)
+- A POST to `/generate` returns HTTP 200
+
+Check with `mcp__chrome-devtools__list_network_requests` and confirm the `/generate` response
+has status 200. Record PASS if 200, FAIL otherwise.
+
+---
+
+### 2.7 — No child name: name band hides
+
+Fill form with Reward Text only (leave Child Name empty), tokens 5, click **Preview**. Verify:
+- No name band is rendered between the header and token row.
+
+Use `evaluate_script`:
 ```javascript
-Array.from(document.querySelectorAll('a.book')).map(a => ({
-  text: a.textContent.trim(),
-  href: a.href,
-  target: a.target
-}))
+getComputedStyle(document.querySelector('.name-band')).display
 ```
 
-### 2.9 — No-times status messages
+Record PASS if `display` is `none` or the element is absent.
 
-Locate courses displayed in the no-time row style. Verify:
-- Courses with a provider but no available times show: `"no times available"`
-- Courses where no online booking was found show: `"no online booking found"`
-- Courses that errored show the actual error message (not a blank cell or `undefined`).
+---
 
-### 2.10 — Cross-check tee time data
+### 2.8 — Custom title renders
 
-For at least 2 courses that have tee times (one Chronogolf, one ForeUP if both present):
+Fill Child Name: `Sam`, Reward Text: `Movie night`, Custom Title: `You are doing great!`. Click **Preview**. Verify:
+- Header left shows "You are doing great!" (not the default "I am working for:")
 
-1. Note the times, prices, and players shown in the UI.
-2. Open the live booking site in a new tab using the Book link URL:
-   - Chronogolf: extract the club slug from the URL, open `https://chronogolf.ca/club/<slug>/teetimes`
-   - ForeUP: open the book URL directly
-3. Compare at least 3 tee times (time, players, price) between the UI and the live site.
-4. Record any discrepancies (wrong price, wrong player count, missing times, extra times).
+---
+
+### 2.9 — All four themes apply colors
+
+For each theme (`Default`, `Blue`, `Green`, `Pink`):
+1. Navigate back to `/`
+2. Fill Reward Text with any value
+3. Select the theme
+4. Click **Preview**
+5. Take a screenshot
+
+Verify the header and footer visually reflect distinct theme colors (Blue and Pink are the
+easiest to spot). Record a NOTE if any theme looks identical to Default unexpectedly.
+
+---
+
+### 2.10 — All token styles render in preview
+
+For each token style (`Star`, `Circle`, `Smiley`, `Thumbs Up`, `PNG Star`, `PNG Smiley`, `PNG Thumbs Up`):
+1. Navigate to `/`
+2. Fill Reward Text with any value
+3. Select the style
+4. Click **Preview**
+
+Use `mcp__chrome-devtools__take_snapshot` to confirm the token slot text matches the expected emoji
+for each style (Star/PNG Star → ⭐, Circle → ⬤, Smiley/PNG Smiley → 😊, Thumbs Up/PNG Thumbs Up → 👍).
+
+Record PASS if all 7 styles produce slots with non-empty content. Record FAIL for any that show ⬜.
+
+---
+
+### 2.11 — Max tokens (10): single-row vs wrap
+
+Fill Reward Text with any value, set Tokens to `10`, click **Preview**.
+
+Verify whether the 10 token slots appear in a single row or wrap to multiple rows. The PDF
+always renders a single row; record a NOTE if the HTML preview wraps.
+
+---
+
+### 2.12 — Page size: A4
+
+Fill Reward Text, select Page Size `A4`, click **Preview**, then **Download PDF**. Verify the
+`/generate` POST returns 200. The PDF content-type check is sufficient here — we cannot
+verify A4 dimensions without opening the PDF.
+
+---
+
+### 2.13 — Download PDF button on main form (known bug candidate)
+
+On the main form at `/`, without filling any fields, click **Download PDF** (the green button
+below Preview). Verify:
+- Does it navigate to `/generate`?
+- Does it show a raw error page?
+- Is there a way for the user to recover (back button aside)?
+
+Record FAIL if it shows a raw error page with no navigation UI.
+
+---
+
+### 2.14 — Back to form: field retention
+
+Fill Child Name `Alex`, Reward Text `Cookie`, Tokens `7`, Theme `Pink`. Click **Preview**.
+On the preview page, click **← Back to form**. Verify:
+- Do the form fields retain the values entered before clicking Preview?
+
+Record PASS if all values are preserved, NOTE if the form resets to defaults.
 
 ---
 
 ## Phase 3 — Document Findings
 
-Write all findings to `QA_FINDINGS.md` in the project root using this template:
+Write all findings to `QA_FINDINGS.md` in the project root:
 
 ```markdown
-# QA Findings — <location> — <date>
+# QA Findings — tokenBoardCreator Web UI
 
 **Run date:** <today>
-**Flags:** --location "<location>" --date <date> --radius <radius> --players <players> --holes <holes> --from <from> --to <to>
 
 ## Summary
 
 | Test | Result | Notes |
 |------|--------|-------|
-| Filter bar pre-population | PASS/FAIL | |
-| Expand/collapse | PASS/FAIL | |
-| From/To filter | PASS/FAIL | |
-| Min spots filter | PASS/FAIL | |
-| Sort | PASS/FAIL | |
-| Hide unavailable | PASS/FAIL | |
-| Date change | PASS/FAIL | |
-| Book links | PASS/FAIL | |
-| No-times status messages | PASS/FAIL | |
-| Data cross-check | PASS/FAIL | |
+| 2.1 Form defaults | PASS/FAIL | |
+| 2.2 Empty reward validation | PASS/FAIL | |
+| 2.3 Token count below min | PASS/FAIL | |
+| 2.4 Token count above max | PASS/FAIL | |
+| 2.5 Happy path preview | PASS/FAIL | |
+| 2.6 Download PDF from preview | PASS/FAIL | |
+| 2.7 No name hides name band | PASS/FAIL | |
+| 2.8 Custom title | PASS/FAIL | |
+| 2.9 All themes | PASS/FAIL/NOTE | |
+| 2.10 All token styles | PASS/FAIL | |
+| 2.11 Max tokens wrap | PASS/NOTE | |
+| 2.12 A4 page size | PASS/FAIL | |
+| 2.13 Download PDF from main form | PASS/FAIL | |
+| 2.14 Back to form field retention | PASS/NOTE | |
 
 ## Detailed Findings
 
@@ -229,149 +285,109 @@ Write all findings to `QA_FINDINGS.md` in the project root using this template:
 
 ---
 
-(repeat for each test)
-
-## Courses Tested
-
-| Course | Provider | Times in UI | Times on Site | Match? |
-|--------|----------|-------------|---------------|--------|
-| | | | | |
+(repeat for each non-PASS result)
 
 ## Recommended Changes
 
-For each FAIL or NOTE, list a brief description of what needs to be fixed.
+For each FAIL or NOTE, one line on what needs to be fixed.
 ```
 
 ---
 
 ## Phase 4 — Decision Gate
 
-Present the findings to the user. If there are no failures or notes, say so and ask whether to proceed with merging.
-
-Use `AskUserQuestion` with this prompt:
+Present the findings to the user. Use `AskUserQuestion`:
 
 ```
-QA is complete. Here's a summary of findings:
+QA is complete. Here's a summary:
 
-<paste the Summary table from QA_FINDINGS.md>
+<paste the Summary table>
 
 Full findings are in QA_FINDINGS.md.
 
-Which issues would you like me to fix? List them by name, or say "all", "none", or "just the majors".
-You can also say "done" to skip straight to merge.
+Which issues would you like me to fix? Say "all", "none", name specific tests, or "done" to skip to merge.
 ```
 
-Wait for the user's response before continuing.
-
-If the user says "none" or "done" and there are no FAIL findings: skip to Phase 8 (Merge).
-If the user says "none" or "done" and there ARE FAIL findings: confirm they want to skip fixes before proceeding.
+- If "none" or "done" and no FAILs: skip to Phase 8.
+- If "none" or "done" and there ARE FAILs: confirm they want to skip before proceeding.
+- Otherwise: proceed to Phase 5 for each approved fix.
 
 ---
 
 ## Phase 5 — Code Changes via Agents
 
-For each approved change:
-
-### 5.1 — Create a feature branch (if not already on one)
+### 5.1 — Create a feature branch
 
 ```bash
-git checkout -b qa/<location-slug>-<date>
+cd /home/owner/GolandProjects/tokenBoardCreator && git checkout -b qa/web-fixes
 ```
 
-Where `<location-slug>` is the location with spaces replaced by hyphens, lowercased.
+### 5.2 — Spawn one agent per approved fix
 
-### 5.2 — Spawn one agent per approved change
-
-For each change, spawn a sub-agent using the Task tool with this prompt structure:
+For each fix, spawn a sub-agent via the Task tool:
 
 ```
-You are working in /home/owner/GolandProjects/teetime.
+You are working in /home/owner/GolandProjects/tokenBoardCreator.
 
-**Problem:** <describe the bug or issue observed during QA — what's broken and where>
+**Problem:** <describe the bug — what's broken, where it manifests, what the user experiences>
 
-**Context:** See QA_FINDINGS.md for full details on this finding.
+**Context:** See QA_FINDINGS.md for supporting detail on this finding.
 
-**Desired outcome:** <describe the correct behavior the user should see>
+**Desired outcome:** <describe the correct behavior>
 
-Do not prescribe an implementation approach — find the best solution yourself.
-Read the relevant source files before making changes.
+Do not prescribe an implementation. Read the relevant source files first.
 Commit your changes as the final step.
 
-End your summary with a risks section in this exact format:
+End your summary with:
 ## Risks
-- Major: <one line, or omit if none>
-- Minor: <one line, or omit if none>
-- Minimal: <one line, or omit if none>
+- Major: <one line, or omit>
+- Minor: <one line, or omit>
+- Minimal: <one line, or omit>
 ```
 
-Key rules for agent prompts:
-- Describe the **problem and desired outcome only** — do not specify how to implement the fix.
-- Link to `QA_FINDINGS.md` for supporting context.
-- Always include the `## Risks` format instruction.
-- Always include "Commit your changes as the final step."
-
-Wait for each agent to complete before running the diff review step.
+Wait for each agent to complete before running Phase 6.
 
 ---
 
 ## Phase 6 — Diff Review
 
-After each agent completes, run `/diff-view` with the risks from the agent's summary.
+After each agent completes, invoke `/diff-view` with `HEAD~<n>..HEAD` (where n = commits the
+agent made) and pass the agent's risks.
 
-### 6.1 — Extract risks from agent summary
+### Risk categories
 
-Parse the agent's `## Risks` section. Extract Major, Minor, and Minimal text.
+- **Major** — can break the app, corrupt PDF output, hang the server, or cause data loss.
+  **Auto-fix immediately** by spawning another agent. Do not ask the user.
+- **Minor** — degrades a specific scenario. Flag to user before fixing.
+- **Minimal** — cosmetic or theoretical. Document only.
 
-### 6.2 — Run diff-view
-
-Invoke the `diff-view` skill (as `/diff-view`) with the ref range pointing to the agent's new commits and the risks from the agent summary.
-
-Use `HEAD~<n>..HEAD` where `<n>` is the number of commits the agent made, or use the commit hash directly.
-
-Pass the risks as: `risks: Major: <text> | Minor: <text> | Minimal: <text>`
-
-### 6.3 — Categorize risks
-
-After the diff opens in the browser, categorize each risk per the project rules:
-
-- **Major** — can break the app, hang execution, cause data loss, or silently corrupt results for all users. **Auto-fix immediately** by spawning another agent (same rules: describe problem + desired outcome, commit, return risks). Do not ask the user first.
-- **Minor** — degrades a specific scenario. Flag clearly in your report. Present to the user before fixing.
-- **Minimal** — pre-existing behavior, cosmetic, or theoretical. Document only.
-
-### 6.4 — Repeat until no Major risks remain
-
-If the auto-fix agent introduces a Major risk in its own diff, spawn another fix agent for that risk. Continue until the diff review shows no Major risks.
-
-Report to the user after each round:
+Repeat until no Major risks remain. Report after each round:
 ```
-Round <N> diff review complete.
-- Major risks: <count> — <auto-fixed | none>
-- Minor risks: <count> — <list>
-- Minimal risks: <count>
+Round <N> complete.
+- Major: <count> — <auto-fixed | none>
+- Minor: <count> — <list>
+- Minimal: <count>
 ```
 
 ---
 
-## Phase 7 — User Approval of Final Diff
+## Phase 7 — User Approval
 
-After all agents have completed and no Major risks remain, show the user the final diff summary and ask:
+When all agents are done and no Major risks remain:
 
 ```
-AskUserQuestion: "All changes are committed and no Major risks remain. Here's the final diff summary:
+AskUserQuestion: "All fixes are committed and no Major risks remain.
 
-<summary from diff-view>
+<final diff summary>
 
-Minor risks identified:
-<list any Minor risks>
+Minor risks: <list, or 'none'>
 
 Ready to merge to main. Approve? (yes / no / fix minor risks first)"
 ```
 
-If the user says "fix minor risks first": spawn agents for each minor risk (same rules) and repeat Phase 6.
-
-If the user says "no": ask what they'd like to change and loop back to Phase 5.
-
-If the user says "yes": proceed to Phase 8.
+- "fix minor risks first" → spawn agents, repeat Phase 6.
+- "no" → ask what to change, loop to Phase 5.
+- "yes" → proceed to Phase 8.
 
 ---
 
@@ -380,7 +396,7 @@ If the user says "yes": proceed to Phase 8.
 ### 8.1 — Final checks
 
 ```bash
-cd /home/owner/GolandProjects/teetime && go build . && go test ./... && go vet ./...
+cd /home/owner/GolandProjects/tokenBoardCreator && go build . && go test ./... -race && go vet ./...
 ```
 
 If any check fails, report to the user. Do not merge.
@@ -388,7 +404,7 @@ If any check fails, report to the user. Do not merge.
 ### 8.2 — Merge
 
 ```bash
-git checkout main && git merge --no-ff qa/<branch-name>
+git checkout main && git merge --no-ff qa/web-fixes
 ```
 
 ### 8.3 — Confirm
@@ -397,7 +413,7 @@ git checkout main && git merge --no-ff qa/<branch-name>
 git log --oneline -5
 ```
 
-Report the final state to the user:
+Report:
 ```
 Merged to main. Final commits:
 <git log output>
@@ -407,18 +423,19 @@ QA_FINDINGS.md documents all findings from this session.
 
 ---
 
-## Checkpoints and State
-
-Keep a running checklist in memory as you execute. If interrupted mid-phase, restart from the last completed phase.
+## Checkpoints
 
 ```
-Phase 1: [ ] Built  [ ] Running at <URL>
-Phase 2: [ ] Pre-pop  [ ] Expand/collapse  [ ] From/To  [ ] Spots  [ ] Sort  [ ] Hide  [ ] Date  [ ] Book  [ ] Status msgs  [ ] Cross-check
+Phase 1: [ ] Built  [ ] Running on :8080  [ ] Browser open
+Phase 2: [ ] 2.1 defaults  [ ] 2.2 required  [ ] 2.3 min  [ ] 2.4 max
+         [ ] 2.5 happy path  [ ] 2.6 download  [ ] 2.7 no name  [ ] 2.8 title
+         [ ] 2.9 themes  [ ] 2.10 styles  [ ] 2.11 wrap  [ ] 2.12 A4
+         [ ] 2.13 main form download  [ ] 2.14 back retention
 Phase 3: [ ] QA_FINDINGS.md written
 Phase 4: [ ] User decisions received
 Phase 5: [ ] Agents spawned and complete
 Phase 6: [ ] Diff reviewed  [ ] No Major risks
-Phase 7: [ ] User approved merge
+Phase 7: [ ] User approved
 Phase 8: [ ] Merged to main
 ```
 
@@ -426,17 +443,17 @@ Phase 8: [ ] Merged to main
 
 ## Error Handling
 
-- **App won't start**: Check for port conflicts, build errors, or missing flags. Report and stop.
-- **Browser won't open**: Try navigating manually to the URL via `navigate_page`. If DevTools MCP is unavailable, document what was tested manually and note the limitation in findings.
-- **Live booking site is unreachable**: Mark the cross-check as SKIPPED with reason; do not fail the entire QA run.
-- **Agent fails to commit**: Note in findings; manually commit at the end of Phase 5 before proceeding to diff review.
-- **Merge conflict**: Report to the user. Do not force-merge.
+- **Build fails**: Report error and stop — do not run.
+- **Port 8080 in use**: `lsof -ti:8080 | xargs kill` then retry once.
+- **Browser unavailable**: Document what was tested manually, note limitation in findings.
+- **Agent fails to commit**: Note in findings; manually commit before diff review.
+- **Merge conflict**: Report to user. Do not force-merge.
 
 ---
 
 ## Notes
 
-- Never make code edits directly. All code changes go through spawned agents (per project rules).
-- Only show new diffs in `/diff-view` — do not re-show diffs already reviewed.
-- The `QA_FINDINGS.md` file persists after the session; do not delete it.
-- Always kill the background server process when the QA session ends: `pkill -f 'teetime.*--web'`
+- Never make code edits directly — all changes go through spawned agents.
+- Kill the server when done: `lsof -ti:8080 | xargs kill`
+- `QA_FINDINGS.md` persists after the session — do not delete it.
+- The app binary is `./tokenBoardCreator`, not `./teetime`.
