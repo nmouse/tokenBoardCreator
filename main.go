@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/owner/tokenBoardCreator/internal/board"
+	"github.com/owner/tokenBoardCreator/internal/imagegen"
 	"github.com/owner/tokenBoardCreator/internal/render"
 )
 
@@ -32,6 +33,7 @@ func run() error {
 	flag.StringVar(&cfg.Title, "title", "", "header title (default: \"I am working for:\")")
 	flag.StringVar(&cfg.Output, "output", "./tokenboard.pdf", "output PDF path")
 	flag.StringVar(&cfg.PageSize, "page-size", "letter", "page size: letter or a4")
+	flag.StringVar(&cfg.BackgroundPrompt, "background-prompt", "", "AI-generated background scene description (e.g. \"dinosaurs in space\"); free, no API key required")
 	flag.BoolVar(&web, "web", false, "start web server for browser-based creation")
 	flag.IntVar(&cfg.WebPort, "port", 8080, "web server port (used with --web)")
 	flag.Parse()
@@ -43,6 +45,19 @@ func run() error {
 	if err := cfg.Validate(); err != nil {
 		flag.Usage()
 		return fmt.Errorf("invalid options: %w", err)
+	}
+
+	if cfg.BackgroundPrompt != "" {
+		apiToken := os.Getenv("HF_TOKEN")
+		if apiToken == "" {
+			return fmt.Errorf("HF_TOKEN environment variable is required for background image generation\n  Get a free token at https://huggingface.co/settings/tokens")
+		}
+		fmt.Println("Generating background image (this may take 10–30 seconds)...")
+		imgBytes, err := imagegen.Generate(context.Background(), cfg.BackgroundPrompt, apiToken)
+		if err != nil {
+			return fmt.Errorf("generating background image: %w", err)
+		}
+		cfg.BackgroundImageBytes = imgBytes
 	}
 
 	if err := render.PDF(context.Background(), cfg); err != nil {

@@ -13,6 +13,10 @@ import (
 	"github.com/owner/tokenBoardCreator/internal/board"
 )
 
+// zoneAlpha is the opacity of zone fills when a background image is present.
+// Keeps zone colors readable while letting the background show through.
+const zoneAlpha = 0.82
+
 // pageDims holds the physical page dimensions in mm.
 type pageDims struct {
 	width  float64
@@ -47,6 +51,26 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	w := dims.width
 	h := dims.height
 
+	hasBackground := len(cfg.BackgroundImageBytes) > 0
+	if hasBackground {
+		tmp, err := os.CreateTemp("", "bg_*.jpg")
+		if err != nil {
+			return fmt.Errorf("creating temp file for background: %w", err)
+		}
+		defer os.Remove(tmp.Name())
+		if _, err := tmp.Write(cfg.BackgroundImageBytes); err != nil {
+			tmp.Close()
+			return fmt.Errorf("writing background image temp file: %w", err)
+		}
+		if err := tmp.Close(); err != nil {
+			return fmt.Errorf("closing background image temp file: %w", err)
+		}
+		pdf.SetAlpha(1.0, "Normal")
+		if err := placeImage(pdf, tmp.Name(), 0, 0, w, h, false); err != nil {
+			return fmt.Errorf("placing background image: %w", err)
+		}
+	}
+
 	// Zone heights derived from layout fractions.
 	headerH := h * board.HeaderFraction
 	nameH := h * board.NameFraction
@@ -60,7 +84,9 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	footerY := tokenY + tokenH
 
 	// --- Header ---
+	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
 	drawRect(pdf, 0, headerY, w, headerH, theme.HeaderBg, theme.HeaderBg)
+	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
 
 	// Title on the left.
 	pdf.SetFont("Helvetica", "B", 18)
@@ -93,7 +119,9 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 	// --- Name band ---
 	if cfg.ChildName != "" {
+		if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
 		drawRect(pdf, 0, nameY, w, nameH, theme.NameBg, theme.NameBg)
+		if hasBackground { pdf.SetAlpha(1.0, "Normal") }
 		pdf.SetFont("Helvetica", "B", 20)
 		setTextColor(pdf, theme.NameText)
 		pdf.SetXY(0, nameY+nameH/2-10)
@@ -104,7 +132,9 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	pdf.Line(0, tokenY, w, tokenY)
 
 	// --- Token row ---
+	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
 	drawRect(pdf, 0, tokenY, w, tokenH, theme.TokenBg, theme.TokenBg)
+	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
 
 	margin := 10.0
 	totalTokenW := w - 2*margin
@@ -135,7 +165,9 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 	// --- Footer ---
 	pdf.Line(0, footerY, w, footerY)
+	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
 	drawRect(pdf, 0, footerY, w, footerH, theme.FooterBg, theme.FooterBg)
+	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
 	drawFooterBorder(pdf, 0, footerY, w, footerH, theme.FooterBorder)
 
 	if err := pdf.OutputFileAndClose(cfg.Output); err != nil {

@@ -9,16 +9,18 @@ import (
 
 // Config holds all parameters needed to generate a token board.
 type Config struct {
-	ChildName   string
-	TokenCount  int
-	TokenStyle  string
-	RewardText  string
-	RewardImage string
-	Theme       string
-	Title       string
-	Output      string
-	PageSize    string
-	WebPort     int
+	ChildName            string
+	TokenCount           int
+	TokenStyle           string
+	RewardText           string
+	RewardImage          string
+	Theme                string
+	Title                string
+	Output               string
+	PageSize             string
+	WebPort              int
+	BackgroundPrompt     string
+	BackgroundImageBytes []byte
 }
 
 // Layout constants define the proportional zones of the page.

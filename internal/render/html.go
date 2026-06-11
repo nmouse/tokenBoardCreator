@@ -11,8 +11,8 @@ import (
 	"strconv"
 
 	"github.com/owner/tokenBoardCreator/internal/assets"
-
 	"github.com/owner/tokenBoardCreator/internal/board"
+	"github.com/owner/tokenBoardCreator/internal/imagegen"
 )
 
 const formHTML = `<!DOCTYPE html>
@@ -73,6 +73,9 @@ const formHTML = `<!DOCTYPE html>
   <label>Custom Title
     <input type="text" name="title" placeholder="I am working for:" value="{{.Title}}">
   </label>
+  <label>Background Scene <span style="font-weight:normal;color:#888">(optional — requires HF_TOKEN env var; ~10–30 sec on download)</span>
+    <input type="text" name="background_prompt" placeholder="e.g. dinosaurs in space, rainbow forest" value="{{.BackgroundPrompt}}">
+  </label>
   <div class="btn-row">
     <button type="submit" class="btn-preview">Preview</button>
   </div>
@@ -82,13 +85,14 @@ const formHTML = `<!DOCTYPE html>
 
 // formData holds values for pre-populating the form template.
 type formData struct {
-	Name       string
-	Reward     string
-	Tokens     int
-	TokenStyle string
-	Theme      string
-	PageSize   string
-	Title      string
+	Name             string
+	Reward           string
+	Tokens           int
+	TokenStyle       string
+	Theme            string
+	PageSize         string
+	Title            string
+	BackgroundPrompt string
 }
 
 var formTmpl = template.Must(template.New("form").Parse(formHTML))
@@ -136,7 +140,8 @@ const previewHTML = `<!DOCTYPE html>
     <input type="hidden" name="theme" value="{{.ThemeName}}">
     <input type="hidden" name="page_size" value="{{.PageSize}}">
     <input type="hidden" name="title" value="{{.Title}}">
-    <button type="submit" class="dl-btn">Download PDF</button>
+    <input type="hidden" name="background_prompt" value="{{.BackgroundPrompt}}">
+    <button type="submit" class="dl-btn">{{if .BackgroundPrompt}}Download PDF (with AI background){{else}}Download PDF{{end}}</button>
   </form>
 </div>
 <a href="{{.BackURL}}" class="back">&#8592; Back to form</a>
@@ -158,18 +163,19 @@ var tokenEmoji = map[string]string{
 
 // previewData is the data model for the HTML preview template.
 type previewData struct {
-	Title      string
-	RewardText string
-	ChildName  string
-	HasName    bool
-	Tokens     []string
-	TokenCount int
-	SlotSize   int
-	TokenStyle string
-	ThemeName  string
-	PageSize   string
-	Theme      previewTheme
-	BackURL    string
+	Title            string
+	RewardText       string
+	ChildName        string
+	HasName          bool
+	Tokens           []string
+	TokenCount       int
+	SlotSize         int
+	TokenStyle       string
+	ThemeName        string
+	PageSize         string
+	Theme            previewTheme
+	BackURL          string
+	BackgroundPrompt string
 }
 
 type previewTheme struct {
@@ -224,13 +230,14 @@ func handleForm(w http.ResponseWriter, r *http.Request) {
 		pageSize = "letter"
 	}
 	fd := formData{
-		Name:       r.URL.Query().Get("name"),
-		Reward:     r.URL.Query().Get("reward"),
-		Tokens:     tokens,
-		TokenStyle: tokenStyle,
-		Theme:      theme,
-		PageSize:   pageSize,
-		Title:      r.URL.Query().Get("title"),
+		Name:             r.URL.Query().Get("name"),
+		Reward:           r.URL.Query().Get("reward"),
+		Tokens:           tokens,
+		TokenStyle:       tokenStyle,
+		Theme:            theme,
+		PageSize:         pageSize,
+		Title:            r.URL.Query().Get("title"),
+		BackgroundPrompt: r.URL.Query().Get("background_prompt"),
 	}
 	var buf bytes.Buffer
 	if err := formTmpl.Execute(&buf, fd); err != nil {
@@ -271,6 +278,9 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	backParams.Set("theme", cfg.Theme)
 	backParams.Set("page_size", cfg.PageSize)
 	backParams.Set("title", r.FormValue("title"))
+	if cfg.BackgroundPrompt != "" {
+		backParams.Set("background_prompt", cfg.BackgroundPrompt)
+	}
 
 	// 648px usable width (680px board - 16px left+right padding).
 	// N slots with 12px gaps: slot = floor((648 - 12*(N-1)) / N).
@@ -278,18 +288,19 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	slotSize := (648 - 12*(n-1)) / n
 
 	data := previewData{
-		Title:      cfg.Title,
-		RewardText: cfg.RewardText,
-		ChildName:  cfg.ChildName,
-		HasName:    cfg.ChildName != "",
-		Tokens:     tokens,
-		TokenCount: cfg.TokenCount,
-		SlotSize:   slotSize,
-		TokenStyle: cfg.TokenStyle,
-		ThemeName:  cfg.Theme,
-		PageSize:   cfg.PageSize,
-		Theme:      themeData,
-		BackURL:    "/?" + backParams.Encode(),
+		Title:            cfg.Title,
+		RewardText:       cfg.RewardText,
+		ChildName:        cfg.ChildName,
+		HasName:          cfg.ChildName != "",
+		Tokens:           tokens,
+		TokenCount:       cfg.TokenCount,
+		SlotSize:         slotSize,
+		TokenStyle:       cfg.TokenStyle,
+		ThemeName:        cfg.Theme,
+		PageSize:         cfg.PageSize,
+		Theme:            themeData,
+		BackURL:          "/?" + backParams.Encode(),
+		BackgroundPrompt: cfg.BackgroundPrompt,
 	}
 
 	var buf bytes.Buffer
@@ -306,6 +317,20 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Invalid form data: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if cfg.BackgroundPrompt != "" {
+		apiToken := os.Getenv("HF_TOKEN")
+		if apiToken == "" {
+			http.Error(w, "HF_TOKEN environment variable is not set on this server.\nGet a free token at https://huggingface.co/settings/tokens", http.StatusBadRequest)
+			return
+		}
+		imgBytes, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
+		if err != nil {
+			http.Error(w, "Background image generation failed: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		cfg.BackgroundImageBytes = imgBytes
 	}
 
 	tmp, err := os.CreateTemp("", "tokenboard_*.pdf")
@@ -335,13 +360,14 @@ func configFromForm(r *http.Request) (board.Config, error) {
 
 	tokens, _ := strconv.Atoi(r.FormValue("tokens"))
 	cfg := board.Config{
-		ChildName:  r.FormValue("name"),
-		RewardText: r.FormValue("reward"),
-		TokenCount: tokens,
-		TokenStyle: r.FormValue("token_style"),
-		Theme:      r.FormValue("theme"),
-		PageSize:   r.FormValue("page_size"),
-		Title:      r.FormValue("title"),
+		ChildName:        r.FormValue("name"),
+		RewardText:       r.FormValue("reward"),
+		TokenCount:       tokens,
+		TokenStyle:       r.FormValue("token_style"),
+		Theme:            r.FormValue("theme"),
+		PageSize:         r.FormValue("page_size"),
+		Title:            r.FormValue("title"),
+		BackgroundPrompt: r.FormValue("background_prompt"),
 	}
 	if err := cfg.Validate(); err != nil {
 		return board.Config{}, err
