@@ -1,0 +1,12 @@
+{
+  "name": "pink",
+  "headerBg":    "#FCE4EC",
+  "headerText":  "#880E4F",
+  "nameBg":      "#F8BBD0",
+  "nameText":    "#880E4F",
+  "tokenBg":     "#FFFFFF",
+  "tokenBorder": "#AD1457",
+  "tokenFill":   "#F48FB1",
+  "footerBg":    "#F8BBD0",
+  "footerBorder":"#AD1457"
+}

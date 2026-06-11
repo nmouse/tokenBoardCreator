@@ -1,0 +1,12 @@
+{
+  "name": "default",
+  "headerBg":    "#FFFFFF",
+  "headerText":  "#333333",
+  "nameBg":      "#F5F5F5",
+  "nameText":    "#333333",
+  "tokenBg":     "#FFFFFF",
+  "tokenBorder": "#AAAAAA",
+  "tokenFill":   "#FFD700",
+  "footerBg":    "#F0F0F0",
+  "footerBorder":"#AAAAAA"
+}

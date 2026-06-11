@@ -1,0 +1,12 @@
+{
+  "name": "green",
+  "headerBg":    "#E8F5E9",
+  "headerText":  "#1B5E20",
+  "nameBg":      "#C8E6C9",
+  "nameText":    "#1B5E20",
+  "tokenBg":     "#FFFFFF",
+  "tokenBorder": "#2E7D32",
+  "tokenFill":   "#66BB6A",
+  "footerBg":    "#C8E6C9",
+  "footerBorder":"#2E7D32"
+}

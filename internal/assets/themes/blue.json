@@ -1,0 +1,12 @@
+{
+  "name": "blue",
+  "headerBg":    "#E3F2FD",
+  "headerText":  "#0D47A1",
+  "nameBg":      "#BBDEFB",
+  "nameText":    "#0D47A1",
+  "tokenBg":     "#FFFFFF",
+  "tokenBorder": "#1565C0",
+  "tokenFill":   "#42A5F5",
+  "footerBg":    "#BBDEFB",
+  "footerBorder":"#1565C0"
+}
