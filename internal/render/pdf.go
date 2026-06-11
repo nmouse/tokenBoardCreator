@@ -84,9 +84,13 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	footerY := tokenY + tokenH
 
 	// --- Header ---
-	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(zoneAlpha, "Normal")
+	}
 	drawRect(pdf, 0, headerY, w, headerH, theme.HeaderBg, theme.HeaderBg)
-	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(1.0, "Normal")
+	}
 
 	// Title on the left.
 	pdf.SetFont("Helvetica", "B", 18)
@@ -119,9 +123,13 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 	// --- Name band ---
 	if cfg.ChildName != "" {
-		if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
+		if hasBackground {
+			pdf.SetAlpha(zoneAlpha, "Normal")
+		}
 		drawRect(pdf, 0, nameY, w, nameH, theme.NameBg, theme.NameBg)
-		if hasBackground { pdf.SetAlpha(1.0, "Normal") }
+		if hasBackground {
+			pdf.SetAlpha(1.0, "Normal")
+		}
 		pdf.SetFont("Helvetica", "B", 20)
 		setTextColor(pdf, theme.NameText)
 		pdf.SetXY(0, nameY+nameH/2-10)
@@ -132,9 +140,13 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	pdf.Line(0, tokenY, w, tokenY)
 
 	// --- Token row ---
-	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(zoneAlpha, "Normal")
+	}
 	drawRect(pdf, 0, tokenY, w, tokenH, theme.TokenBg, theme.TokenBg)
-	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(1.0, "Normal")
+	}
 
 	margin := 10.0
 	totalTokenW := w - 2*margin
@@ -165,9 +177,13 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 	// --- Footer ---
 	pdf.Line(0, footerY, w, footerY)
-	if hasBackground { pdf.SetAlpha(zoneAlpha, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(zoneAlpha, "Normal")
+	}
 	drawRect(pdf, 0, footerY, w, footerH, theme.FooterBg, theme.FooterBg)
-	if hasBackground { pdf.SetAlpha(1.0, "Normal") }
+	if hasBackground {
+		pdf.SetAlpha(1.0, "Normal")
+	}
 	drawFooterBorder(pdf, 0, footerY, w, footerH, theme.FooterBorder)
 
 	if err := pdf.OutputFileAndClose(cfg.Output); err != nil {

@@ -93,6 +93,18 @@ const formHTML = `<!DOCTYPE html>
     <button type="submit" class="btn-preview">Preview</button>
   </div>
 </form>
+<div id="ai-loading" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:Arial,sans-serif;font-size:18px;gap:16px;">
+  <div style="width:48px;height:48px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;"></div>
+  Generating AI background&hellip; (~10&ndash;30 sec)
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<script>
+document.querySelector('form').addEventListener('submit', function() {
+  if (document.querySelector('[name="background_prompt"]').value.trim()) {
+    document.getElementById('ai-loading').style.display = 'flex';
+  }
+});
+</script>
 </body>
 </html>`
 
@@ -122,7 +134,7 @@ const previewHTML = `<!DOCTYPE html>
 <title>Token Board Preview</title>
 <style>
   body { font-family: Arial, sans-serif; background: #eee; margin: 0; padding: 20px; }
-  .board { width: 680px; margin: 0 auto; background: white; border: 2px solid #999; box-shadow: 2px 2px 8px rgba(0,0,0,0.2); }
+  .board { width: 680px; margin: 0 auto; background: white; border: 2px solid #999; box-shadow: 2px 2px 8px rgba(0,0,0,0.2); overflow: hidden; }
   .header { background: {{.Theme.HeaderBg}}; color: {{.Theme.HeaderText}}; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; min-height: 80px; }
   .header-left { font-size: 20px; font-weight: bold; }
   .header-right { font-size: 24px; font-weight: bold; }
@@ -138,16 +150,16 @@ const previewHTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="board">
-  <div class="header">
+<div class="board"{{if .BackgroundImageSrc}} style="background-image:url({{.BackgroundImageSrc}});background-size:cover;background-position:center;"{{end}}>
+  <div class="header"{{if .BackgroundImageSrc}} style="opacity:0.82;"{{end}}>
     <div class="header-left">{{.Title}}</div>
     <div class="header-right">{{if .RewardImageSrc}}<img src="{{.RewardImageSrc}}" style="max-height:80px;max-width:200px;object-fit:contain;">{{else}}{{.RewardText}}{{end}}</div>
   </div>
-  {{if .HasName}}<div class="name-band">{{.ChildName}}</div>{{end}}
-  <div class="token-row">
+  {{if .HasName}}<div class="name-band"{{if $.BackgroundImageSrc}} style="opacity:0.82;"{{end}}>{{.ChildName}}</div>{{end}}
+  <div class="token-row"{{if .BackgroundImageSrc}} style="opacity:0.82;"{{end}}>
     {{range .Tokens}}<div class="token-slot" style="width:{{$.SlotSize}}px;height:{{$.SlotSize}}px;">{{.}}</div>{{end}}
   </div>
-  <div class="footer"><div class="footer-inner"></div></div>
+  <div class="footer"{{if .BackgroundImageSrc}} style="opacity:0.82;"{{end}}><div class="footer-inner"></div></div>
 </div>
 <div class="dl-form">
   <form method="POST" action="/generate">
@@ -161,6 +173,7 @@ const previewHTML = `<!DOCTYPE html>
     <input type="hidden" name="background_prompt" value="{{.BackgroundPrompt}}">
     <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
     <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
+    <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
     <button type="submit" class="dl-btn">{{if .BackgroundPrompt}}Download PDF (with AI background){{else}}Download PDF{{end}}</button>
   </form>
 </div>
@@ -175,6 +188,7 @@ const previewHTML = `<!DOCTYPE html>
   <input type="hidden" name="background_prompt" value="{{.BackgroundPrompt}}">
   <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
   <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
+  <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
   <button type="submit" class="back">&#8592; Back to form</button>
 </form>
 </body>
@@ -184,10 +198,10 @@ var previewTmpl = template.Must(template.New("preview").Parse(previewHTML))
 
 // tokenEmoji maps builtin styles to a display emoji for the HTML preview.
 var tokenEmoji = map[string]string{
-	"star":     "⭐",
-	"circle":   "⬤",
-	"smiley":   "😊",
-	"thumbsup": "👍",
+	"star":         "⭐",
+	"circle":       "⬤",
+	"smiley":       "😊",
+	"thumbsup":     "👍",
 	"png:star":     "⭐",
 	"png:smiley":   "😊",
 	"png:thumbsup": "👍",
@@ -195,22 +209,24 @@ var tokenEmoji = map[string]string{
 
 // previewData is the data model for the HTML preview template.
 type previewData struct {
-	Title            string
-	RewardText       string
-	ChildName        string
-	HasName          bool
-	Tokens           []string
-	TokenCount       int
-	SlotSize         int
-	TokenStyle       string
-	ThemeName        string
-	PageSize         string
-	Theme            previewTheme
-	BackURL          string
-	BackgroundPrompt string
-	RewardImageData  string       // URL-safe base64 reward image (for hidden field passthrough)
-	RewardImageSrc   template.URL // data: URL for <img src> preview
-	TokenImageData   string       // URL-safe base64 custom token image (for hidden field passthrough)
+	Title               string
+	RewardText          string
+	ChildName           string
+	HasName             bool
+	Tokens              []string
+	TokenCount          int
+	SlotSize            int
+	TokenStyle          string
+	ThemeName           string
+	PageSize            string
+	Theme               previewTheme
+	BackURL             string
+	BackgroundPrompt    string
+	RewardImageData     string       // URL-safe base64 reward image (for hidden field passthrough)
+	RewardImageSrc      template.URL // data: URL for <img src> preview
+	TokenImageData      string       // URL-safe base64 custom token image (for hidden field passthrough)
+	BackgroundImageData string       // URL-safe base64 AI background image (for hidden field passthrough)
+	BackgroundImageSrc  template.URL // data: URL for CSS background display in preview
 }
 
 type previewTheme struct {
@@ -345,23 +361,49 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	tokenImgBytes, _ := resolveImageData(r, "token_image", "token_image_data")
 	tokenImgData := base64.URLEncoding.EncodeToString(tokenImgBytes)
 
+	// Generate (or reuse cached) AI background image.
+	var bgImgData string
+	var bgImgSrc template.URL
+	if cfg.BackgroundPrompt != "" {
+		bgBytes, _ := resolveImageData(r, "", "background_image_data")
+		if len(bgBytes) == 0 {
+			// No cached image — generate one now.
+			apiToken := os.Getenv("HF_TOKEN")
+			if apiToken == "" {
+				writeHTMLError(w, http.StatusBadRequest,
+					"HF_TOKEN environment variable is not set on this server.\nRestart the server with HF_TOKEN set to use AI background generation.\nGet a free token at https://huggingface.co/settings/tokens")
+				return
+			}
+			generated, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
+			if err != nil {
+				writeHTMLError(w, http.StatusBadGateway, "Background image generation failed: "+err.Error())
+				return
+			}
+			bgBytes = generated
+		}
+		bgImgData = base64.URLEncoding.EncodeToString(bgBytes)
+		bgImgSrc = imageDataURL(bgBytes)
+	}
+
 	data := previewData{
-		Title:            cfg.Title,
-		RewardText:       cfg.RewardText,
-		ChildName:        cfg.ChildName,
-		HasName:          cfg.ChildName != "",
-		Tokens:           tokens,
-		TokenCount:       cfg.TokenCount,
-		SlotSize:         slotSize,
-		TokenStyle:       cfg.TokenStyle,
-		ThemeName:        cfg.Theme,
-		PageSize:         cfg.PageSize,
-		Theme:            themeData,
-		BackURL:          "/?" + backParams.Encode(),
-		BackgroundPrompt: cfg.BackgroundPrompt,
-		RewardImageData:  rewardImgData,
-		RewardImageSrc:   rewardImgSrc,
-		TokenImageData:   tokenImgData,
+		Title:               cfg.Title,
+		RewardText:          cfg.RewardText,
+		ChildName:           cfg.ChildName,
+		HasName:             cfg.ChildName != "",
+		Tokens:              tokens,
+		TokenCount:          cfg.TokenCount,
+		SlotSize:            slotSize,
+		TokenStyle:          cfg.TokenStyle,
+		ThemeName:           cfg.Theme,
+		PageSize:            cfg.PageSize,
+		Theme:               themeData,
+		BackURL:             "/?" + backParams.Encode(),
+		BackgroundPrompt:    cfg.BackgroundPrompt,
+		RewardImageData:     rewardImgData,
+		RewardImageSrc:      rewardImgSrc,
+		TokenImageData:      tokenImgData,
+		BackgroundImageData: bgImgData,
+		BackgroundImageSrc:  bgImgSrc,
 	}
 
 	var buf bytes.Buffer
@@ -373,22 +415,38 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 }
 
+// writeHTMLError renders a styled error page with a back button.
+func writeHTMLError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>Error</title>
+<style>body{font-family:Arial,sans-serif;max-width:600px;margin:60px auto;padding:0 20px;background:#f9f9f9}
+.box{background:#fff;border:1px solid #f5c6cb;border-radius:6px;padding:20px 24px;color:#721c24;background-color:#f8d7da}
+h2{margin-top:0}pre{white-space:pre-wrap;word-break:break-word;margin:8px 0 0}
+.back{display:inline-block;margin-top:20px;padding:8px 18px;background:#1565C0;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none}
+</style></head><body>
+<div class="box"><h2>Something went wrong</h2><pre>%s</pre></div>
+<a class="back" href="javascript:history.back()">&#8592; Go back</a>
+</body></html>`, template.HTMLEscapeString(msg))
+}
+
 func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromForm(r)
 	if err != nil {
-		http.Error(w, "Invalid form data: "+err.Error(), http.StatusBadRequest)
+		writeHTMLError(w, http.StatusBadRequest, "Invalid form data: "+err.Error())
 		return
 	}
 
 	if cfg.RewardImage == "uploaded" {
 		imgBytes, err := resolveImageData(r, "reward_image", "reward_image_data")
 		if err != nil || len(imgBytes) == 0 {
-			http.Error(w, "Reward image data missing or invalid", http.StatusBadRequest)
+			writeHTMLError(w, http.StatusBadRequest, "Reward image data missing or invalid")
 			return
 		}
 		tmpPath, err := writeTempImage(imgBytes, "reward_")
 		if err != nil {
-			http.Error(w, "Server error", http.StatusInternalServerError)
+			writeHTMLError(w, http.StatusInternalServerError, "Server error")
 			return
 		}
 		defer os.Remove(tmpPath)
@@ -398,12 +456,12 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if cfg.TokenStyle == "custom" {
 		imgBytes, err := resolveImageData(r, "token_image", "token_image_data")
 		if err != nil || len(imgBytes) == 0 {
-			http.Error(w, "Token image data missing or invalid", http.StatusBadRequest)
+			writeHTMLError(w, http.StatusBadRequest, "Token image data missing or invalid")
 			return
 		}
 		tmpPath, err := writeTempImage(imgBytes, "token_")
 		if err != nil {
-			http.Error(w, "Server error", http.StatusInternalServerError)
+			writeHTMLError(w, http.StatusInternalServerError, "Server error")
 			return
 		}
 		defer os.Remove(tmpPath)
@@ -411,14 +469,9 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cfg.BackgroundPrompt != "" {
-		apiToken := os.Getenv("HF_TOKEN")
-		if apiToken == "" {
-			http.Error(w, "HF_TOKEN environment variable is not set on this server.\nGet a free token at https://huggingface.co/settings/tokens", http.StatusBadRequest)
-			return
-		}
-		imgBytes, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
-		if err != nil {
-			http.Error(w, "Background image generation failed: "+err.Error(), http.StatusBadGateway)
+		imgBytes, err := resolveImageData(r, "", "background_image_data")
+		if err != nil || len(imgBytes) == 0 {
+			writeHTMLError(w, http.StatusBadRequest, "Background image data missing — go back and regenerate the preview.")
 			return
 		}
 		cfg.BackgroundImageBytes = imgBytes
@@ -426,7 +479,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 	tmp, err := os.CreateTemp("", "tokenboard_*.pdf")
 	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
+		writeHTMLError(w, http.StatusInternalServerError, "Server error")
 		return
 	}
 	defer os.Remove(tmp.Name())
@@ -434,7 +487,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 	cfg.Output = tmp.Name()
 	if err := PDF(r.Context(), cfg); err != nil {
-		http.Error(w, "PDF generation failed: "+err.Error(), http.StatusInternalServerError)
+		writeHTMLError(w, http.StatusInternalServerError, "PDF generation failed: "+err.Error())
 		return
 	}
 
