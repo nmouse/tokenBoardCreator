@@ -45,7 +45,9 @@ const formHTML = `<!DOCTYPE html>
     <input type="text" name="reward" placeholder="e.g. iPad time" value="{{.Reward}}">
   </label>
   <label>Reward Image <span style="font-weight:normal;color:#888">(optional — replaces reward text)</span>
+    {{if .RewardImageSrc}}<div style="margin-top:4px"><img src="{{.RewardImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace</small></div>{{end}}
     <input type="file" name="reward_image" accept="image/*" style="padding:4px 0;">
+    <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
   </label>
   <label>Number of Tokens (3–10)
     <input type="number" name="tokens" min="3" max="10" value="{{.Tokens}}" required>
@@ -59,10 +61,13 @@ const formHTML = `<!DOCTYPE html>
       <option value="png:star"{{if eq .TokenStyle "png:star"}} selected{{end}}>PNG Star</option>
       <option value="png:smiley"{{if eq .TokenStyle "png:smiley"}} selected{{end}}>PNG Smiley</option>
       <option value="png:thumbsup"{{if eq .TokenStyle "png:thumbsup"}} selected{{end}}>PNG Thumbs Up</option>
+      {{if eq .TokenStyle "custom"}}<option value="custom" selected>Custom Image (uploaded)</option>{{end}}
     </select>
   </label>
   <label>Custom Token Image <span style="font-weight:normal;color:#888">(optional — overrides token style)</span>
+    {{if .TokenImageSrc}}<div style="margin-top:4px"><img src="{{.TokenImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace, or select a different style above</small></div>{{end}}
     <input type="file" name="token_image" accept="image/*" style="padding:4px 0;">
+    <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
   </label>
   <label>Theme
     <select name="theme">
@@ -101,6 +106,10 @@ type formData struct {
 	PageSize         string
 	Title            string
 	BackgroundPrompt string
+	RewardImageData  string       // URL-safe base64 reward image for hidden field passthrough
+	RewardImageSrc   template.URL // data: URL for thumbnail preview
+	TokenImageData   string       // URL-safe base64 token image for hidden field passthrough
+	TokenImageSrc    template.URL // data: URL for thumbnail preview
 }
 
 var formTmpl = template.Must(template.New("form").Parse(formHTML))
@@ -122,7 +131,8 @@ const previewHTML = `<!DOCTYPE html>
   .token-slot { border: 2px solid {{.Theme.TokenBorder}}; border-radius: 8px; background: {{.Theme.TokenBg}}; display: flex; align-items: center; justify-content: center; font-size: 36px; }
   .footer { background: {{.Theme.FooterBg}}; border-top: 2px solid {{.Theme.FooterBorder}}; height: 80px; display: flex; align-items: center; justify-content: center; }
   .footer-inner { border: 2px dashed {{.Theme.FooterBorder}}; width: calc(100% - 20px); height: 60px; margin: 0 10px; border-radius: 4px; }
-  .back { display: block; text-align: center; margin: 20px auto; color: #1565C0; text-decoration: none; font-size: 16px; }
+  .back-form { text-align: center; margin: 20px auto; }
+  .back { background: none; border: none; cursor: pointer; color: #1565C0; font-size: 16px; }
   .dl-form { text-align: center; margin: 16px; }
   .dl-btn { padding: 10px 24px; background: #2E7D32; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; }
 </style>
@@ -154,7 +164,19 @@ const previewHTML = `<!DOCTYPE html>
     <button type="submit" class="dl-btn">{{if .BackgroundPrompt}}Download PDF (with AI background){{else}}Download PDF{{end}}</button>
   </form>
 </div>
-<a href="{{.BackURL}}" class="back">&#8592; Back to form</a>
+<form method="POST" action="/" class="back-form">
+  <input type="hidden" name="name" value="{{.ChildName}}">
+  <input type="hidden" name="reward" value="{{.RewardText}}">
+  <input type="hidden" name="tokens" value="{{.TokenCount}}">
+  <input type="hidden" name="token_style" value="{{.TokenStyle}}">
+  <input type="hidden" name="theme" value="{{.ThemeName}}">
+  <input type="hidden" name="page_size" value="{{.PageSize}}">
+  <input type="hidden" name="title" value="{{.Title}}">
+  <input type="hidden" name="background_prompt" value="{{.BackgroundPrompt}}">
+  <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
+  <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
+  <button type="submit" class="back">&#8592; Back to form</button>
+</form>
 </body>
 </html>`
 
@@ -207,6 +229,7 @@ type previewTheme struct {
 func WebServer(ctx context.Context, port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", handleForm)
+	mux.HandleFunc("POST /", handleForm)
 	mux.HandleFunc("POST /preview", handlePreview)
 	mux.HandleFunc("POST /generate", handleGenerate)
 
@@ -226,31 +249,44 @@ func WebServer(ctx context.Context, port int) error {
 }
 
 func handleForm(w http.ResponseWriter, r *http.Request) {
-	tokens, _ := strconv.Atoi(r.URL.Query().Get("tokens"))
+	tokens, _ := strconv.Atoi(r.FormValue("tokens"))
 	if tokens == 0 {
 		tokens = 5
 	}
-	tokenStyle := r.URL.Query().Get("token_style")
+	tokenStyle := r.FormValue("token_style")
 	if tokenStyle == "" {
 		tokenStyle = "star"
 	}
-	theme := r.URL.Query().Get("theme")
+	theme := r.FormValue("theme")
 	if theme == "" {
 		theme = "default"
 	}
-	pageSize := r.URL.Query().Get("page_size")
+	pageSize := r.FormValue("page_size")
 	if pageSize == "" {
 		pageSize = "letter"
 	}
 	fd := formData{
-		Name:             r.URL.Query().Get("name"),
-		Reward:           r.URL.Query().Get("reward"),
+		Name:             r.FormValue("name"),
+		Reward:           r.FormValue("reward"),
 		Tokens:           tokens,
 		TokenStyle:       tokenStyle,
 		Theme:            theme,
 		PageSize:         pageSize,
-		Title:            r.URL.Query().Get("title"),
-		BackgroundPrompt: r.URL.Query().Get("background_prompt"),
+		Title:            r.FormValue("title"),
+		BackgroundPrompt: r.FormValue("background_prompt"),
+	}
+	// Restore uploaded images when navigating back from preview.
+	fd.RewardImageData = r.FormValue("reward_image_data")
+	if fd.RewardImageData != "" {
+		if b, err := base64.URLEncoding.DecodeString(fd.RewardImageData); err == nil && len(b) > 0 {
+			fd.RewardImageSrc = imageDataURL(b)
+		}
+	}
+	fd.TokenImageData = r.FormValue("token_image_data")
+	if fd.TokenImageData != "" {
+		if b, err := base64.URLEncoding.DecodeString(fd.TokenImageData); err == nil && len(b) > 0 {
+			fd.TokenImageSrc = imageDataURL(b)
+		}
 	}
 	var buf bytes.Buffer
 	if err := formTmpl.Execute(&buf, fd); err != nil {
@@ -300,13 +336,14 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	n := cfg.TokenCount
 	slotSize := (648 - 12*(n-1)) / n
 
-	rewardImgBytes := readUpload(r, "reward_image")
+	rewardImgBytes, _ := resolveImageData(r, "reward_image", "reward_image_data")
 	rewardImgData := base64.URLEncoding.EncodeToString(rewardImgBytes)
 	var rewardImgSrc template.URL
 	if len(rewardImgBytes) > 0 {
-		rewardImgSrc = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(rewardImgBytes))
+		rewardImgSrc = imageDataURL(rewardImgBytes)
 	}
-	tokenImgData := base64.URLEncoding.EncodeToString(readUpload(r, "token_image"))
+	tokenImgBytes, _ := resolveImageData(r, "token_image", "token_image_data")
+	tokenImgData := base64.URLEncoding.EncodeToString(tokenImgBytes)
 
 	data := previewData{
 		Title:            cfg.Title,
@@ -428,7 +465,7 @@ func configFromForm(r *http.Request) (board.Config, error) {
 	if r.FormValue("reward_image_data") != "" || hasUpload(r, "reward_image") {
 		cfg.RewardImage = "uploaded"
 	}
-	if r.FormValue("token_image_data") != "" || hasUpload(r, "token_image") {
+	if hasUpload(r, "token_image") || (r.FormValue("token_style") == "custom" && r.FormValue("token_image_data") != "") {
 		cfg.TokenStyle = "custom"
 	}
 
@@ -456,6 +493,12 @@ func readUpload(r *http.Request, field string) []byte {
 func hasUpload(r *http.Request, field string) bool {
 	_, fh, err := r.FormFile(field)
 	return err == nil && fh.Size > 0
+}
+
+// imageDataURL returns a data: URL for image bytes, detecting the MIME type from the content.
+func imageDataURL(b []byte) template.URL {
+	mime := http.DetectContentType(b)
+	return template.URL("data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(b))
 }
 
 // imageExt returns the file extension for image bytes based on magic bytes.
