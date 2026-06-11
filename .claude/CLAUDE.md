@@ -56,3 +56,17 @@ Each theme defines: headerBg, headerText, nameBg, nameText, tokenBg, tokenBorder
 - `context.Context` first param on blocking/I/O functions
 - Table-driven tests with `t.Run`
 - Every exported symbol needs a doc comment starting with its name
+
+## Git / Version Control
+- Always use SSH URLs (`git@github.com:...`) for remotes — SSH keys are configured, HTTPS will prompt for login
+
+## Image Generation
+- Use Hugging Face with `HF_TOKEN` env var — Pollinations.ai is blocked on WSL's shared IP
+- Verified endpoint: `https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell`
+
+## Verification / Testing
+- After web UI changes, verify with the Chrome DevTools MCP (navigate, click, screenshot) — do not fall back to curl
+- Confirm the MCP is connected before starting verification; if disconnected, fix it rather than working around it
+
+## Environment / Tooling
+- Do not use `jq` — it is not installed; use Python (`python3 -c` or a `.py` script) for JSON parsing
