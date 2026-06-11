@@ -106,8 +106,8 @@ const previewHTML = `<!DOCTYPE html>
   .header-left { font-size: 20px; font-weight: bold; }
   .header-right { font-size: 24px; font-weight: bold; }
   .name-band { background: {{.Theme.NameBg}}; color: {{.Theme.NameText}}; text-align: center; padding: 10px; font-size: 22px; font-weight: bold; {{if not .HasName}}display:none;{{end}} }
-  .token-row { background: {{.Theme.TokenBg}}; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 24px 16px; flex-wrap: wrap; }
-  .token-slot { width: 70px; height: 70px; border: 2px solid {{.Theme.TokenBorder}}; border-radius: 8px; background: {{.Theme.TokenBg}}; display: flex; align-items: center; justify-content: center; font-size: 36px; }
+  .token-row { background: {{.Theme.TokenBg}}; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 24px 16px; }
+  .token-slot { border: 2px solid {{.Theme.TokenBorder}}; border-radius: 8px; background: {{.Theme.TokenBg}}; display: flex; align-items: center; justify-content: center; font-size: 36px; }
   .footer { background: {{.Theme.FooterBg}}; border-top: 2px solid {{.Theme.FooterBorder}}; height: 80px; display: flex; align-items: center; justify-content: center; }
   .footer-inner { border: 2px dashed {{.Theme.FooterBorder}}; width: calc(100% - 20px); height: 60px; margin: 0 10px; border-radius: 4px; }
   .back { display: block; text-align: center; margin: 20px auto; color: #1565C0; text-decoration: none; font-size: 16px; }
@@ -123,7 +123,7 @@ const previewHTML = `<!DOCTYPE html>
   </div>
   {{if .HasName}}<div class="name-band">{{.ChildName}}</div>{{end}}
   <div class="token-row">
-    {{range .Tokens}}<div class="token-slot">{{.}}</div>{{end}}
+    {{range .Tokens}}<div class="token-slot" style="width:{{$.SlotSize}}px;height:{{$.SlotSize}}px;">{{.}}</div>{{end}}
   </div>
   <div class="footer"><div class="footer-inner"></div></div>
 </div>
@@ -164,6 +164,7 @@ type previewData struct {
 	HasName    bool
 	Tokens     []string
 	TokenCount int
+	SlotSize   int
 	TokenStyle string
 	ThemeName  string
 	PageSize   string
@@ -271,6 +272,11 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	backParams.Set("page_size", cfg.PageSize)
 	backParams.Set("title", cfg.Title)
 
+	// 648px usable width (680px board - 16px left+right padding).
+	// N slots with 12px gaps: slot = floor((648 - 12*(N-1)) / N).
+	n := cfg.TokenCount
+	slotSize := (648 - 12*(n-1)) / n
+
 	data := previewData{
 		Title:      cfg.Title,
 		RewardText: cfg.RewardText,
@@ -278,6 +284,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		HasName:    cfg.ChildName != "",
 		Tokens:     tokens,
 		TokenCount: cfg.TokenCount,
+		SlotSize:   slotSize,
 		TokenStyle: cfg.TokenStyle,
 		ThemeName:  cfg.Theme,
 		PageSize:   cfg.PageSize,
