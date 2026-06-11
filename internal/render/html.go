@@ -270,7 +270,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	backParams.Set("token_style", cfg.TokenStyle)
 	backParams.Set("theme", cfg.Theme)
 	backParams.Set("page_size", cfg.PageSize)
-	backParams.Set("title", cfg.Title)
+	backParams.Set("title", r.FormValue("title"))
 
 	// 648px usable width (680px board - 16px left+right padding).
 	// N slots with 12px gaps: slot = floor((648 - 12*(N-1)) / N).
