@@ -316,13 +316,13 @@ func handleForm(w http.ResponseWriter, r *http.Request) {
 func handlePreview(w http.ResponseWriter, r *http.Request) {
 	cfg, err := configFromForm(r)
 	if err != nil {
-		http.Error(w, "Invalid form data: "+err.Error(), http.StatusBadRequest)
+		writeHTMLError(w, http.StatusBadRequest, "Invalid form data: "+err.Error())
 		return
 	}
 
 	themeData, err := loadPreviewTheme(cfg.Theme)
 	if err != nil {
-		http.Error(w, "Theme error: "+err.Error(), http.StatusInternalServerError)
+		writeHTMLError(w, http.StatusInternalServerError, "Theme error: "+err.Error())
 		return
 	}
 
@@ -408,7 +408,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 
 	var buf bytes.Buffer
 	if err := previewTmpl.Execute(&buf, data); err != nil {
-		http.Error(w, "Template error: "+err.Error(), http.StatusInternalServerError)
+		writeHTMLError(w, http.StatusInternalServerError, "Template error: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
