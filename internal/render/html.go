@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -36,41 +37,41 @@ const formHTML = `<!DOCTYPE html>
 <h1>Token Board Creator</h1>
 <form method="POST" action="/preview">
   <label>Child Name (optional)
-    <input type="text" name="name" placeholder="e.g. Alex">
+    <input type="text" name="name" placeholder="e.g. Alex" value="{{.Name}}">
   </label>
   <label>Reward Text
-    <input type="text" name="reward" required placeholder="e.g. iPad time">
+    <input type="text" name="reward" required placeholder="e.g. iPad time" value="{{.Reward}}">
   </label>
   <label>Number of Tokens (3–10)
-    <input type="number" name="tokens" min="3" max="10" value="5" required>
+    <input type="number" name="tokens" min="3" max="10" value="{{.Tokens}}" required>
   </label>
   <label>Token Style
     <select name="token_style">
-      <option value="star">Star</option>
-      <option value="circle">Circle</option>
-      <option value="smiley">Smiley</option>
-      <option value="thumbsup">Thumbs Up</option>
-      <option value="png:star">PNG Star</option>
-      <option value="png:smiley">PNG Smiley</option>
-      <option value="png:thumbsup">PNG Thumbs Up</option>
+      <option value="star"{{if eq .TokenStyle "star"}} selected{{end}}>Star</option>
+      <option value="circle"{{if eq .TokenStyle "circle"}} selected{{end}}>Circle</option>
+      <option value="smiley"{{if eq .TokenStyle "smiley"}} selected{{end}}>Smiley</option>
+      <option value="thumbsup"{{if eq .TokenStyle "thumbsup"}} selected{{end}}>Thumbs Up</option>
+      <option value="png:star"{{if eq .TokenStyle "png:star"}} selected{{end}}>PNG Star</option>
+      <option value="png:smiley"{{if eq .TokenStyle "png:smiley"}} selected{{end}}>PNG Smiley</option>
+      <option value="png:thumbsup"{{if eq .TokenStyle "png:thumbsup"}} selected{{end}}>PNG Thumbs Up</option>
     </select>
   </label>
   <label>Theme
     <select name="theme">
-      <option value="default">Default</option>
-      <option value="blue">Blue</option>
-      <option value="green">Green</option>
-      <option value="pink">Pink</option>
+      <option value="default"{{if eq .Theme "default"}} selected{{end}}>Default</option>
+      <option value="blue"{{if eq .Theme "blue"}} selected{{end}}>Blue</option>
+      <option value="green"{{if eq .Theme "green"}} selected{{end}}>Green</option>
+      <option value="pink"{{if eq .Theme "pink"}} selected{{end}}>Pink</option>
     </select>
   </label>
   <label>Page Size
     <select name="page_size">
-      <option value="letter">Letter</option>
-      <option value="a4">A4</option>
+      <option value="letter"{{if eq .PageSize "letter"}} selected{{end}}>Letter</option>
+      <option value="a4"{{if eq .PageSize "a4"}} selected{{end}}>A4</option>
     </select>
   </label>
   <label>Custom Title
-    <input type="text" name="title" placeholder="I am working for:">
+    <input type="text" name="title" placeholder="I am working for:" value="{{.Title}}">
   </label>
   <div class="btn-row">
     <button type="submit" class="btn-preview">Preview</button>
@@ -78,6 +79,19 @@ const formHTML = `<!DOCTYPE html>
 </form>
 </body>
 </html>`
+
+// formData holds values for pre-populating the form template.
+type formData struct {
+	Name       string
+	Reward     string
+	Tokens     int
+	TokenStyle string
+	Theme      string
+	PageSize   string
+	Title      string
+}
+
+var formTmpl = template.Must(template.New("form").Parse(formHTML))
 
 const previewHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -125,7 +139,7 @@ const previewHTML = `<!DOCTYPE html>
     <button type="submit" class="dl-btn">Download PDF</button>
   </form>
 </div>
-<a href="/" class="back">&#8592; Back to form</a>
+<a href="{{.BackURL}}" class="back">&#8592; Back to form</a>
 </body>
 </html>`
 
@@ -154,6 +168,7 @@ type previewData struct {
 	ThemeName  string
 	PageSize   string
 	Theme      previewTheme
+	BackURL    string
 }
 
 type previewTheme struct {
@@ -191,8 +206,38 @@ func WebServer(ctx context.Context, port int) error {
 }
 
 func handleForm(w http.ResponseWriter, r *http.Request) {
+	tokens, _ := strconv.Atoi(r.URL.Query().Get("tokens"))
+	if tokens == 0 {
+		tokens = 5
+	}
+	tokenStyle := r.URL.Query().Get("token_style")
+	if tokenStyle == "" {
+		tokenStyle = "star"
+	}
+	theme := r.URL.Query().Get("theme")
+	if theme == "" {
+		theme = "default"
+	}
+	pageSize := r.URL.Query().Get("page_size")
+	if pageSize == "" {
+		pageSize = "letter"
+	}
+	fd := formData{
+		Name:       r.URL.Query().Get("name"),
+		Reward:     r.URL.Query().Get("reward"),
+		Tokens:     tokens,
+		TokenStyle: tokenStyle,
+		Theme:      theme,
+		PageSize:   pageSize,
+		Title:      r.URL.Query().Get("title"),
+	}
+	var buf bytes.Buffer
+	if err := formTmpl.Execute(&buf, fd); err != nil {
+		http.Error(w, "Template error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, formHTML)
+	w.Write(buf.Bytes())
 }
 
 func handlePreview(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +262,15 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		tokens[i] = emoji
 	}
 
+	backParams := url.Values{}
+	backParams.Set("name", cfg.ChildName)
+	backParams.Set("reward", cfg.RewardText)
+	backParams.Set("tokens", strconv.Itoa(cfg.TokenCount))
+	backParams.Set("token_style", cfg.TokenStyle)
+	backParams.Set("theme", cfg.Theme)
+	backParams.Set("page_size", cfg.PageSize)
+	backParams.Set("title", cfg.Title)
+
 	data := previewData{
 		Title:      cfg.Title,
 		RewardText: cfg.RewardText,
@@ -228,6 +282,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		ThemeName:  cfg.Theme,
 		PageSize:   cfg.PageSize,
 		Theme:      themeData,
+		BackURL:    "/?" + backParams.Encode(),
 	}
 
 	var buf bytes.Buffer
