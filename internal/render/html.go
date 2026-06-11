@@ -3,8 +3,10 @@ package render
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,12 +37,15 @@ const formHTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Token Board Creator</h1>
-<form method="POST" action="/preview">
+<form method="POST" action="/preview" enctype="multipart/form-data">
   <label>Child Name (optional)
     <input type="text" name="name" placeholder="e.g. Alex" value="{{.Name}}">
   </label>
-  <label>Reward Text
-    <input type="text" name="reward" required placeholder="e.g. iPad time" value="{{.Reward}}">
+  <label>Reward Text <span style="font-weight:normal;color:#888">(optional if uploading image below)</span>
+    <input type="text" name="reward" placeholder="e.g. iPad time" value="{{.Reward}}">
+  </label>
+  <label>Reward Image <span style="font-weight:normal;color:#888">(optional — replaces reward text)</span>
+    <input type="file" name="reward_image" accept="image/*" style="padding:4px 0;">
   </label>
   <label>Number of Tokens (3–10)
     <input type="number" name="tokens" min="3" max="10" value="{{.Tokens}}" required>
@@ -55,6 +60,9 @@ const formHTML = `<!DOCTYPE html>
       <option value="png:smiley"{{if eq .TokenStyle "png:smiley"}} selected{{end}}>PNG Smiley</option>
       <option value="png:thumbsup"{{if eq .TokenStyle "png:thumbsup"}} selected{{end}}>PNG Thumbs Up</option>
     </select>
+  </label>
+  <label>Custom Token Image <span style="font-weight:normal;color:#888">(optional — overrides token style)</span>
+    <input type="file" name="token_image" accept="image/*" style="padding:4px 0;">
   </label>
   <label>Theme
     <select name="theme">
@@ -123,7 +131,7 @@ const previewHTML = `<!DOCTYPE html>
 <div class="board">
   <div class="header">
     <div class="header-left">{{.Title}}</div>
-    <div class="header-right">{{.RewardText}}</div>
+    <div class="header-right">{{if .RewardImageSrc}}<img src="{{.RewardImageSrc}}" style="max-height:80px;max-width:200px;object-fit:contain;">{{else}}{{.RewardText}}{{end}}</div>
   </div>
   {{if .HasName}}<div class="name-band">{{.ChildName}}</div>{{end}}
   <div class="token-row">
@@ -141,6 +149,8 @@ const previewHTML = `<!DOCTYPE html>
     <input type="hidden" name="page_size" value="{{.PageSize}}">
     <input type="hidden" name="title" value="{{.Title}}">
     <input type="hidden" name="background_prompt" value="{{.BackgroundPrompt}}">
+    <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
+    <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
     <button type="submit" class="dl-btn">{{if .BackgroundPrompt}}Download PDF (with AI background){{else}}Download PDF{{end}}</button>
   </form>
 </div>
@@ -176,6 +186,9 @@ type previewData struct {
 	Theme            previewTheme
 	BackURL          string
 	BackgroundPrompt string
+	RewardImageData  string       // URL-safe base64 reward image (for hidden field passthrough)
+	RewardImageSrc   template.URL // data: URL for <img src> preview
+	TokenImageData   string       // URL-safe base64 custom token image (for hidden field passthrough)
 }
 
 type previewTheme struct {
@@ -287,6 +300,14 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	n := cfg.TokenCount
 	slotSize := (648 - 12*(n-1)) / n
 
+	rewardImgBytes := readUpload(r, "reward_image")
+	rewardImgData := base64.URLEncoding.EncodeToString(rewardImgBytes)
+	var rewardImgSrc template.URL
+	if len(rewardImgBytes) > 0 {
+		rewardImgSrc = template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(rewardImgBytes))
+	}
+	tokenImgData := base64.URLEncoding.EncodeToString(readUpload(r, "token_image"))
+
 	data := previewData{
 		Title:            cfg.Title,
 		RewardText:       cfg.RewardText,
@@ -301,6 +322,9 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		Theme:            themeData,
 		BackURL:          "/?" + backParams.Encode(),
 		BackgroundPrompt: cfg.BackgroundPrompt,
+		RewardImageData:  rewardImgData,
+		RewardImageSrc:   rewardImgSrc,
+		TokenImageData:   tokenImgData,
 	}
 
 	var buf bytes.Buffer
@@ -317,6 +341,36 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Invalid form data: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if cfg.RewardImage == "uploaded" {
+		imgBytes, err := resolveImageData(r, "reward_image", "reward_image_data")
+		if err != nil || len(imgBytes) == 0 {
+			http.Error(w, "Reward image data missing or invalid", http.StatusBadRequest)
+			return
+		}
+		tmpPath, err := writeTempImage(imgBytes, "reward_")
+		if err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+		defer os.Remove(tmpPath)
+		cfg.RewardImage = tmpPath
+	}
+
+	if cfg.TokenStyle == "custom" {
+		imgBytes, err := resolveImageData(r, "token_image", "token_image_data")
+		if err != nil || len(imgBytes) == 0 {
+			http.Error(w, "Token image data missing or invalid", http.StatusBadRequest)
+			return
+		}
+		tmpPath, err := writeTempImage(imgBytes, "token_")
+		if err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			return
+		}
+		defer os.Remove(tmpPath)
+		cfg.TokenStyle = tmpPath
 	}
 
 	if cfg.BackgroundPrompt != "" {
@@ -354,7 +408,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 // configFromForm parses and validates a Config from an HTTP form submission.
 func configFromForm(r *http.Request) (board.Config, error) {
-	if err := r.ParseForm(); err != nil {
+	if err := r.ParseMultipartForm(10 << 20); err != nil && err != http.ErrNotMultipart {
 		return board.Config{}, fmt.Errorf("parsing form: %w", err)
 	}
 
@@ -369,10 +423,78 @@ func configFromForm(r *http.Request) (board.Config, error) {
 		Title:            r.FormValue("title"),
 		BackgroundPrompt: r.FormValue("background_prompt"),
 	}
+
+	// Sentinels let Validate() pass when images are provided via upload.
+	if r.FormValue("reward_image_data") != "" || hasUpload(r, "reward_image") {
+		cfg.RewardImage = "uploaded"
+	}
+	if r.FormValue("token_image_data") != "" || hasUpload(r, "token_image") {
+		cfg.TokenStyle = "custom"
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return board.Config{}, err
 	}
 	return cfg, nil
+}
+
+// readUpload reads the bytes from a multipart file upload field, returning nil if absent or on error.
+func readUpload(r *http.Request, field string) []byte {
+	f, _, err := r.FormFile(field)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// hasUpload reports whether a non-empty file was uploaded for the given field.
+func hasUpload(r *http.Request, field string) bool {
+	_, fh, err := r.FormFile(field)
+	return err == nil && fh.Size > 0
+}
+
+// imageExt returns the file extension for image bytes based on magic bytes.
+func imageExt(b []byte) string {
+	switch {
+	case len(b) >= 4 && b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G':
+		return ".png"
+	case len(b) >= 2 && b[0] == 0xff && b[1] == 0xd8:
+		return ".jpg"
+	default:
+		return ".png"
+	}
+}
+
+// writeTempImage writes image bytes to a temp file with the correct extension and returns the path.
+func writeTempImage(imgBytes []byte, prefix string) (string, error) {
+	ext := imageExt(imgBytes)
+	tmp, err := os.CreateTemp("", prefix+"*"+ext)
+	if err != nil {
+		return "", err
+	}
+	defer tmp.Close()
+	if _, err := tmp.Write(imgBytes); err != nil {
+		os.Remove(tmp.Name())
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+// resolveImageData returns image bytes from a direct upload field or a URL-safe base64-encoded form field.
+func resolveImageData(r *http.Request, uploadField, dataField string) ([]byte, error) {
+	if b := readUpload(r, uploadField); len(b) > 0 {
+		return b, nil
+	}
+	encoded := r.FormValue(dataField)
+	if encoded == "" {
+		return nil, nil
+	}
+	return base64.URLEncoding.DecodeString(encoded)
 }
 
 // loadPreviewTheme converts an assets.Theme into template-safe CSS strings.
