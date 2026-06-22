@@ -76,7 +76,7 @@ const formHTML = `<!DOCTYPE html>
   <label>Number of Tokens (3–10)
     <input type="number" name="tokens" min="3" max="10" value="{{.Tokens}}" required>
   </label>
-  <label>Token Style
+  <label id="global-token-style-label">Token Style
     <select name="token_style">
       <option value="star"{{if eq .TokenStyle "star"}} selected{{end}}>Star</option>
       <option value="circle"{{if eq .TokenStyle "circle"}} selected{{end}}>Circle</option>
@@ -88,7 +88,13 @@ const formHTML = `<!DOCTYPE html>
       {{if eq .TokenStyle "custom"}}<option value="custom" selected>Custom Image (uploaded)</option>{{end}}
     </select>
   </label>
-  <label>Custom Token Image <span style="font-weight:normal;color:#888">(optional — overrides token style)</span>
+  <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-weight:bold;color:#555;">
+    <input type="checkbox" id="individual_styles" name="individual_styles"{{if .IndividualStyles}} checked{{end}} style="width:auto;margin:0;">
+    Customize each slot individually
+  </label>
+  <div id="slot-styles-container"></div>
+  <input type="hidden" id="token_styles_data" value="{{.TokenStylesData}}">
+  <label id="custom-token-image-label">Custom Token Image <span style="font-weight:normal;color:#888">(optional — overrides token style)</span>
     {{if .TokenImageSrc}}<div style="margin-top:4px"><img src="{{.TokenImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace, or select a different style above</small></div>{{end}}
     <input type="file" name="token_image" accept="image/*" style="padding:4px 0;">
     <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
@@ -105,6 +111,8 @@ const formHTML = `<!DOCTYPE html>
     <select name="page_size">
       <option value="letter"{{if eq .PageSize "letter"}} selected{{end}}>Letter</option>
       <option value="a4"{{if eq .PageSize "a4"}} selected{{end}}>A4</option>
+      <option value="letter-half"{{if eq .PageSize "letter-half"}} selected{{end}}>Letter — Half Page</option>
+      <option value="a4-half"{{if eq .PageSize "a4-half"}} selected{{end}}>A4 — Half Page</option>
     </select>
   </label>
   <label>Custom Title
@@ -123,11 +131,65 @@ const formHTML = `<!DOCTYPE html>
 </div>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script>
-document.querySelector('form').addEventListener('submit', function() {
-  if (document.querySelector('[name="background_prompt"]').value.trim()) {
-    document.getElementById('ai-loading').style.display = 'flex';
+(function() {
+  var styleOptions = [
+    {value:'star', label:'Star'},
+    {value:'circle', label:'Circle'},
+    {value:'smiley', label:'Smiley'},
+    {value:'thumbsup', label:'Thumbs Up'},
+    {value:'png:star', label:'PNG Star'},
+    {value:'png:smiley', label:'PNG Smiley'},
+    {value:'png:thumbsup', label:'PNG Thumbs Up'},
+  ];
+
+  function updateSlotDropdowns() {
+    var checked = document.getElementById('individual_styles').checked;
+    document.getElementById('global-token-style-label').style.display = checked ? 'none' : '';
+    document.getElementById('custom-token-image-label').style.display = checked ? 'none' : '';
+
+    var container = document.getElementById('slot-styles-container');
+    container.innerHTML = '';
+    if (!checked) return;
+
+    var n = parseInt(document.querySelector('[name="tokens"]').value) || 5;
+    var existingRaw = document.getElementById('token_styles_data').value;
+    var existing = existingRaw ? existingRaw.split(',') : [];
+
+    for (var i = 0; i < n; i++) {
+      var val = existing[i] || styleOptions[0].value;
+      var wrapper = document.createElement('div');
+      wrapper.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;';
+      var lbl = document.createElement('span');
+      lbl.style.cssText = 'min-width:52px;color:#555;font-size:14px;';
+      lbl.textContent = 'Slot ' + (i + 1) + ':';
+      var sel = document.createElement('select');
+      sel.name = 'token_style_' + (i + 1);
+      sel.style.cssText = 'flex:1;margin-top:0;';
+      styleOptions.forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.text = opt.label;
+        if (opt.value === val) o.selected = true;
+        sel.appendChild(o);
+      });
+      wrapper.appendChild(lbl);
+      wrapper.appendChild(sel);
+      container.appendChild(wrapper);
+    }
   }
-});
+
+  document.getElementById('individual_styles').addEventListener('change', updateSlotDropdowns);
+  document.querySelector('[name="tokens"]').addEventListener('input', function() {
+    if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
+  });
+  if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
+
+  document.querySelector('form').addEventListener('submit', function() {
+    if (document.querySelector('[name="background_prompt"]').value.trim()) {
+      document.getElementById('ai-loading').style.display = 'flex';
+    }
+  });
+})();
 </script>
 </body>
 </html>`
@@ -138,6 +200,8 @@ type formData struct {
 	Reward           string
 	Tokens           int
 	TokenStyle       string
+	IndividualStyles bool   // whether per-slot customization is enabled
+	TokenStylesData  string // comma-joined per-slot styles for JS pre-population
 	Theme            string
 	PageSize         string
 	Title            string
@@ -251,6 +315,8 @@ const previewHTML = `<!DOCTYPE html>
     <input type="hidden" name="reward" value="{{.RewardText}}">
     <input type="hidden" name="tokens" value="{{.TokenCount}}">
     <input type="hidden" name="token_style" value="{{.TokenStyle}}">
+    {{if .IndividualStyles}}<input type="hidden" name="individual_styles" value="on">
+    <input type="hidden" name="token_styles" value="{{.TokenStylesCSV}}">{{end}}
     <input type="hidden" name="theme" value="{{.ThemeName}}">
     <input type="hidden" name="page_size" value="{{.PageSize}}">
     <input type="hidden" name="title" value="{{.Title}}">
@@ -266,6 +332,8 @@ const previewHTML = `<!DOCTYPE html>
   <input type="hidden" name="reward" value="{{.RewardText}}">
   <input type="hidden" name="tokens" value="{{.TokenCount}}">
   <input type="hidden" name="token_style" value="{{.TokenStyle}}">
+  {{if .IndividualStyles}}<input type="hidden" name="individual_styles" value="on">
+  <input type="hidden" name="token_styles" value="{{.TokenStylesCSV}}">{{end}}
   <input type="hidden" name="theme" value="{{.ThemeName}}">
   <input type="hidden" name="page_size" value="{{.PageSize}}">
   <input type="hidden" name="title" value="{{.Title}}">
@@ -301,6 +369,8 @@ type previewData struct {
 	TokenCount          int
 	SlotSize            int
 	TokenStyle          string
+	IndividualStyles    bool   // whether per-slot customization is enabled
+	TokenStylesCSV      string // comma-joined per-slot styles for hidden field passthrough
 	ThemeName           string
 	PageSize            string
 	Theme               previewTheme
@@ -409,6 +479,8 @@ func handleForm(w http.ResponseWriter, r *http.Request) {
 		Reward:           r.FormValue("reward"),
 		Tokens:           tokens,
 		TokenStyle:       tokenStyle,
+		IndividualStyles: r.FormValue("individual_styles") == "on",
+		TokenStylesData:  r.FormValue("token_styles"),
 		Theme:            theme,
 		PageSize:         pageSize,
 		Title:            r.FormValue("title"),
@@ -449,13 +521,23 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	emoji := tokenEmoji[cfg.TokenStyle]
-	if emoji == "" {
-		emoji = "⬜"
-	}
 	tokens := make([]string, cfg.TokenCount)
 	for i := range tokens {
-		tokens[i] = emoji
+		style := cfg.TokenStyle
+		if len(cfg.TokenStyles) == cfg.TokenCount {
+			style = cfg.TokenStyles[i]
+		}
+		e := tokenEmoji[style]
+		if e == "" {
+			e = "⬜"
+		}
+		tokens[i] = e
+	}
+
+	indStyles := len(cfg.TokenStyles) == cfg.TokenCount
+	var tokenStylesCSV string
+	if indStyles {
+		tokenStylesCSV = strings.Join(cfg.TokenStyles, ",")
 	}
 
 	backParams := url.Values{}
@@ -520,6 +602,8 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		TokenCount:          cfg.TokenCount,
 		SlotSize:            slotSize,
 		TokenStyle:          cfg.TokenStyle,
+		IndividualStyles:    indStyles,
+		TokenStylesCSV:      tokenStylesCSV,
 		ThemeName:           cfg.Theme,
 		PageSize:            cfg.PageSize,
 		Theme:               themeData,
@@ -629,6 +713,7 @@ func configFromForm(r *http.Request) (board.Config, error) {
 	}
 
 	tokens, _ := strconv.Atoi(r.FormValue("tokens"))
+	individualStyles := r.FormValue("individual_styles") == "on"
 	cfg := board.Config{
 		ChildName:        r.FormValue("name"),
 		RewardText:       r.FormValue("reward"),
@@ -644,8 +729,32 @@ func configFromForm(r *http.Request) (board.Config, error) {
 	if r.FormValue("reward_image_data") != "" || hasUpload(r, "reward_image") {
 		cfg.RewardImage = "uploaded"
 	}
-	if hasUpload(r, "token_image") || (r.FormValue("token_style") == "custom" && r.FormValue("token_image_data") != "") {
+	// Only apply custom token image when individual styles are not active.
+	if !individualStyles && (hasUpload(r, "token_image") || (r.FormValue("token_style") == "custom" && r.FormValue("token_image_data") != "")) {
 		cfg.TokenStyle = "custom"
+	}
+
+	// Read per-slot styles when individual customization is enabled.
+	if individualStyles {
+		n := tokens
+		if r.FormValue("token_style_1") != "" {
+			// Individual slot fields from main form submission.
+			styles := make([]string, n)
+			for i := range styles {
+				s := r.FormValue(fmt.Sprintf("token_style_%d", i+1))
+				if s == "" {
+					s = cfg.TokenStyle
+				}
+				styles[i] = s
+			}
+			cfg.TokenStyles = styles
+		} else if ts := r.FormValue("token_styles"); ts != "" {
+			// Comma-joined passthrough from preview hidden field.
+			parts := strings.Split(ts, ",")
+			if len(parts) == n {
+				cfg.TokenStyles = parts
+			}
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {

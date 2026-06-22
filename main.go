@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/owner/tokenBoardCreator/internal/board"
 	"github.com/owner/tokenBoardCreator/internal/imagegen"
@@ -23,20 +24,26 @@ func main() {
 func run() error {
 	var cfg board.Config
 	var web bool
+	var tokenStylesFlag string
 
 	flag.StringVar(&cfg.ChildName, "name", "", "child's name (optional)")
 	flag.IntVar(&cfg.TokenCount, "tokens", 5, "number of token slots (3–10)")
 	flag.StringVar(&cfg.TokenStyle, "token-style", "star", "token style: star, circle, smiley, thumbsup, png:star, png:smiley, png:thumbsup, or a file path")
+	flag.StringVar(&tokenStylesFlag, "token-styles", "", "per-slot styles, comma-separated (e.g. \"star,circle,smiley\"); length must equal --tokens; overrides --token-style")
 	flag.StringVar(&cfg.RewardText, "reward", "", "reward text (e.g. \"iPad time\")")
 	flag.StringVar(&cfg.RewardImage, "reward-image", "", "optional path to reward image (PNG/JPG)")
 	flag.StringVar(&cfg.Theme, "theme", "default", "color theme: default, blue, green, pink")
 	flag.StringVar(&cfg.Title, "title", "", "header title (default: \"I am working for:\")")
 	flag.StringVar(&cfg.Output, "output", "./tokenboard.pdf", "output PDF path")
-	flag.StringVar(&cfg.PageSize, "page-size", "letter", "page size: letter or a4")
+	flag.StringVar(&cfg.PageSize, "page-size", "letter", "page size: letter, a4, letter-half, a4-half")
 	flag.StringVar(&cfg.BackgroundPrompt, "background-prompt", "", "AI-generated background scene description (e.g. \"dinosaurs in space\"); free, no API key required")
 	flag.BoolVar(&web, "web", false, "start web server for browser-based creation")
 	flag.IntVar(&cfg.WebPort, "port", 8080, "web server port (used with --web)")
 	flag.Parse()
+
+	if tokenStylesFlag != "" {
+		cfg.TokenStyles = strings.Split(tokenStylesFlag, ",")
+	}
 
 	if web {
 		return render.WebServer(context.Background(), cfg.WebPort)

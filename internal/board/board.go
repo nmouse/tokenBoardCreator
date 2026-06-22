@@ -12,6 +12,7 @@ type Config struct {
 	ChildName            string
 	TokenCount           int
 	TokenStyle           string
+	TokenStyles          []string // per-slot overrides; len == TokenCount when set, else nil
 	RewardText           string
 	RewardImage          string
 	Theme                string
@@ -46,8 +47,10 @@ var validThemes = map[string]bool{
 
 // validPageSizes is the set of supported page size names.
 var validPageSizes = map[string]bool{
-	"letter": true,
-	"a4":     true,
+	"letter":      true,
+	"a4":          true,
+	"letter-half": true,
+	"a4-half":     true,
 }
 
 // builtinTokenStyles are styles rendered with fpdf primitives (no image files).
@@ -81,7 +84,16 @@ func (c *Config) Validate() error {
 		c.PageSize = "letter"
 	}
 	if !validPageSizes[c.PageSize] {
-		errs = append(errs, fmt.Sprintf("unknown page size %q; valid sizes: letter, a4", c.PageSize))
+		errs = append(errs, fmt.Sprintf("unknown page size %q; valid sizes: letter, a4, letter-half, a4-half", c.PageSize))
+	}
+
+	if len(c.TokenStyles) > 0 && len(c.TokenStyles) != c.TokenCount {
+		errs = append(errs, fmt.Sprintf("token-styles must have %d entries (one per slot), got %d", c.TokenCount, len(c.TokenStyles)))
+	}
+	for i, s := range c.TokenStyles {
+		if err := validateTokenStyle(s); err != nil {
+			errs = append(errs, fmt.Sprintf("token style for slot %d: %v", i+1, err))
+		}
 	}
 
 	if c.Title == "" {

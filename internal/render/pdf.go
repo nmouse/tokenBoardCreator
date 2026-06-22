@@ -24,8 +24,10 @@ type pageDims struct {
 }
 
 var pageSizes = map[string]pageDims{
-	"letter": {215.9, 279.4},
-	"a4":     {210.0, 297.0},
+	"letter":      {215.9, 279.4},
+	"a4":          {210.0, 297.0},
+	"letter-half": {215.9, 139.7},
+	"a4-half":     {210.0, 148.5},
 }
 
 // PDF generates a token board PDF and writes it to cfg.Output.
@@ -36,14 +38,11 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	}
 
 	dims := pageSizes[cfg.PageSize]
-	fpdfSize := cfg.PageSize
-	if cfg.PageSize == "letter" {
-		fpdfSize = "Letter"
-	} else {
-		fpdfSize = "A4"
-	}
-
-	pdf := fpdf.New("P", "mm", fpdfSize, "")
+	pdf := fpdf.NewCustom(&fpdf.InitType{
+		OrientationStr: "P",
+		UnitStr:        "mm",
+		Size:           fpdf.SizeType{Wd: dims.width, Ht: dims.height},
+	})
 	pdf.SetMargins(0, 0, 0)
 	pdf.SetAutoPageBreak(false, 0)
 	pdf.AddPage()
@@ -169,7 +168,7 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 		// Draw token centered inside slot with padding.
 		pad := 4.0
-		if err := drawToken(pdf, cfg.TokenStyle, slotX+pad, slotY+pad, slotW-2*pad, slotH-2*pad, theme); err != nil {
+		if err := drawToken(pdf, slotStyle(cfg, i), slotX+pad, slotY+pad, slotW-2*pad, slotH-2*pad, theme); err != nil {
 			// Non-fatal: leave slot empty on token draw error.
 			_ = err
 		}
@@ -190,6 +189,14 @@ func PDF(ctx context.Context, cfg board.Config) error {
 		return fmt.Errorf("writing PDF: %w", err)
 	}
 	return nil
+}
+
+// slotStyle returns the token style for slot i, using per-slot overrides when set.
+func slotStyle(cfg board.Config, i int) string {
+	if len(cfg.TokenStyles) == cfg.TokenCount {
+		return cfg.TokenStyles[i]
+	}
+	return cfg.TokenStyle
 }
 
 // drawToken dispatches to the appropriate renderer for the given style.
