@@ -97,16 +97,29 @@ func PDF(ctx context.Context, cfg board.Config) error {
 	pdf.SetXY(10, headerY+10)
 	pdf.CellFormat(w/2-15, 10, cfg.Title, "", 0, "LM", false, 0, "")
 
-	// Reward on the right: image then text, or just text.
+	// Reward on the right: image+text, image only, or text only.
 	rewardX := w/2 + 5
 	rewardW := w/2 - 15
+	hasBothReward := cfg.RewardImage != "" && cfg.RewardText != ""
 	if cfg.RewardImage != "" {
-		imgErr := placeImage(pdf, cfg.RewardImage, rewardX, headerY+5, rewardW, headerH-10, false)
+		imgH := headerH - 10
+		if hasBothReward {
+			imgH = (headerH - 10) * 0.62
+		}
+		imgErr := placeImage(pdf, cfg.RewardImage, rewardX, headerY+5, rewardW, imgH, false)
 		if imgErr != nil {
 			// Fall back to text if image fails.
-			pdf.SetXY(rewardX, headerY+10)
 			pdf.SetFont("Helvetica", "B", 16)
-			pdf.CellFormat(rewardW, 10, cfg.RewardText, "", 0, "CM", false, 0, "")
+			setTextColor(pdf, theme.HeaderText)
+			pdf.SetXY(rewardX, headerY+headerH/2-8)
+			pdf.CellFormat(rewardW, 16, cfg.RewardText, "", 0, "CM", false, 0, "")
+		} else if hasBothReward {
+			// Image placed; draw text below it.
+			textAreaH := headerH - 10 - imgH
+			pdf.SetFont("Helvetica", "B", 12)
+			setTextColor(pdf, theme.HeaderText)
+			pdf.SetXY(rewardX, headerY+5+imgH+(textAreaH-6)/2)
+			pdf.CellFormat(rewardW, 12, cfg.RewardText, "", 0, "CM", false, 0, "")
 		}
 	} else {
 		pdf.SetFont("Helvetica", "B", 22)

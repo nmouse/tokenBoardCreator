@@ -86,7 +86,7 @@ const formHTML = `<!DOCTYPE html>
   </div>
   <a href="/settings">&#9881; Settings</a>
 </div>
-<script>var _restoredTokens={{.CustomTokensJSON}};var _hasRewardPrompt={{if .RewardImagePrompt}}true{{else}}false{{end}};var _restoredTokenStyle={{.TokenStyleJSON}};</script>
+<script>var _restoredTokens={{.CustomTokensJSON}};var _restoredTokenNames={{.CustomTokenNamesJSON}};var _hasRewardPrompt={{if .RewardImagePrompt}}true{{else}}false{{end}};var _restoredTokenStyle={{.TokenStyleJSON}};</script>
 <form method="POST" action="/preview" enctype="multipart/form-data">
 
   <div class="card">
@@ -98,7 +98,7 @@ const formHTML = `<!DOCTYPE html>
       <input type="text" name="reward" placeholder="e.g. iPad time" value="{{.Reward}}" id="reward-input">
     </label>
     <div id="reward-error" style="display:none;color:#c62828;font-size:13px;margin-top:6px;padding:8px 12px;background:#FFF5F5;border:1px solid #FFCDD2;border-radius:6px;">Please enter a Reward Text, or upload / generate a Reward Image below.</div>
-    <label>Reward Image <span class="hint">(optional — replaces reward text)</span></label>
+    <label>Reward Image <span class="hint">(optional)</span></label>
     <div style="margin-top:4px;">
       <div class="mode-toggle">
         <label><input type="radio" name="reward_image_mode" value="upload" id="ri_mode_upload" onchange="rewardModeChange()" checked> Upload</label>
@@ -159,6 +159,7 @@ const formHTML = `<!DOCTYPE html>
         <small class="hint">Requires Hugging Face token — <a href="/settings">Settings</a></small>
       </div>
       <div id="at_preview" style="margin-top:6px;"></div>
+      <input type="text" id="at_name" placeholder="Name (optional, e.g. Pizza)" style="margin-top:8px;">
       <button type="button" onclick="addCustomToken()" style="margin-top:8px;padding:7px 14px;background:#5C6BC0;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">+ Add to Token List</button>
       <div id="custom-token-hidden-fields"></div>
     </div>
@@ -228,8 +229,8 @@ const formHTML = `<!DOCTYPE html>
       {value:'png:smiley', label:'PNG Smiley'},
       {value:'png:thumbsup', label:'PNG Thumbs Up'},
     ];
-    customTokens.forEach(function(_, i) {
-      base.push({value: 'custom:' + i, label: 'Custom ' + (i + 1)});
+    customTokens.forEach(function(t, i) {
+      base.push({value: 'custom:' + i, label: t.name || 'Custom ' + (i + 1)});
     });
     return base;
   }
@@ -286,10 +287,10 @@ const formHTML = `<!DOCTYPE html>
         if (globalSel.options[i].value.indexOf('custom:') === 0) toRemove.push(i);
       }
       for (var j = toRemove.length - 1; j >= 0; j--) globalSel.remove(toRemove[j]);
-      customTokens.forEach(function(_, i) {
+      customTokens.forEach(function(t, i) {
         var o = document.createElement('option');
         o.value = 'custom:' + i;
-        o.text = 'Custom ' + (i + 1);
+        o.text = t.name || 'Custom ' + (i + 1);
         globalSel.appendChild(o);
       });
       globalSel.value = currentVal;
@@ -306,6 +307,11 @@ const formHTML = `<!DOCTYPE html>
       inp.name = 'custom_token_data_' + i;
       inp.value = t.base64;
       container.appendChild(inp);
+      var nameInp = document.createElement('input');
+      nameInp.type = 'hidden';
+      nameInp.name = 'custom_token_name_' + i;
+      nameInp.value = t.name || '';
+      container.appendChild(nameInp);
     });
   }
 
@@ -316,9 +322,12 @@ const formHTML = `<!DOCTYPE html>
 
   window.addCustomToken = function() {
     if (!pendingCustomImage) { alert('Choose a file or generate an image first.'); return; }
-    customTokens.push(pendingCustomImage);
+    var nameInput = document.getElementById('at_name');
+    var name = nameInput ? nameInput.value.trim() : '';
+    customTokens.push(Object.assign({}, pendingCustomImage, {name: name}));
     pendingCustomImage = null;
     document.getElementById('at_preview').innerHTML = '';
+    if (nameInput) nameInput.value = '';
     var f = document.getElementById('at_file');
     if (f) f.value = '';
     refreshAllDropdowns();
@@ -438,9 +447,10 @@ const formHTML = `<!DOCTYPE html>
   // Page-load initialization.
   (function init() {
     if (typeof _restoredTokens !== 'undefined' && _restoredTokens && _restoredTokens.length) {
-      _restoredTokens.forEach(function(b64) {
+      _restoredTokens.forEach(function(b64, i) {
         var stdB64 = b64.replace(/-/g, '+').replace(/_/g, '/');
-        customTokens.push({dataURL: 'data:image/png;base64,' + stdB64, base64: b64});
+        var name = (typeof _restoredTokenNames !== 'undefined' && _restoredTokenNames && _restoredTokenNames[i]) ? _restoredTokenNames[i] : '';
+        customTokens.push({dataURL: 'data:image/png;base64,' + stdB64, base64: b64, name: name});
       });
       refreshAllDropdowns();
       serializeCustomTokens();
@@ -473,23 +483,24 @@ const formHTML = `<!DOCTYPE html>
 
 // formData holds values for pre-populating the form template.
 type formData struct {
-	Name                string
-	Reward              string
-	Tokens              int
-	TokenStyle          string
-	IndividualStyles    bool   // whether per-slot customization is enabled
-	TokenStylesData     string // comma-joined per-slot styles for JS pre-population
-	Theme               string
-	PageSize            string
-	Title               string
-	BackgroundPrompt    string
-	BackgroundImageData string       // URL-safe base64 background image for hidden field passthrough
-	BackgroundImageSrc  template.URL // data: URL for thumbnail preview
-	RewardImageData     string       // URL-safe base64 reward image for hidden field passthrough
-	RewardImageSrc      template.URL // data: URL for thumbnail preview
-	RewardImagePrompt   string       // AI generation prompt for reward image
-	CustomTokensJSON    template.JS  // JSON array of URL-safe base64 strings for JS restoration
-	TokenStyleJSON      template.JS  // JS string literal of the current token style for restoration
+	Name                 string
+	Reward               string
+	Tokens               int
+	TokenStyle           string
+	IndividualStyles     bool   // whether per-slot customization is enabled
+	TokenStylesData      string // comma-joined per-slot styles for JS pre-population
+	Theme                string
+	PageSize             string
+	Title                string
+	BackgroundPrompt     string
+	BackgroundImageData  string       // URL-safe base64 background image for hidden field passthrough
+	BackgroundImageSrc   template.URL // data: URL for thumbnail preview
+	RewardImageData      string       // URL-safe base64 reward image for hidden field passthrough
+	RewardImageSrc       template.URL // data: URL for thumbnail preview
+	RewardImagePrompt    string       // AI generation prompt for reward image
+	CustomTokensJSON     template.JS  // JSON array of URL-safe base64 strings for JS restoration
+	CustomTokenNamesJSON template.JS  // JSON array of custom token names for JS restoration
+	TokenStyleJSON       template.JS  // JS string literal of the current token style for restoration
 }
 
 var formTmpl = template.Must(template.New("form").Parse(formHTML))
@@ -618,7 +629,7 @@ const previewHTML = `<!DOCTYPE html>
   <div class="board"{{if .BackgroundImageSrc}} style="background-image:url({{.BackgroundImageSrc}});background-size:cover;background-position:center;"{{end}}>
     <div class="header"{{if .BackgroundImageSrc}} style="opacity:0.82;"{{end}}>
       <div class="header-left">{{.Title}}</div>
-      <div class="header-right">{{if .RewardImageSrc}}<img src="{{.RewardImageSrc}}" style="max-height:80px;max-width:200px;object-fit:contain;">{{else}}{{.RewardText}}{{end}}</div>
+      <div class="header-right" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">{{if .RewardImageSrc}}<img src="{{.RewardImageSrc}}" style="max-height:60px;max-width:180px;object-fit:contain;">{{end}}{{if .RewardText}}<span>{{.RewardText}}</span>{{end}}</div>
     </div>
     {{if .HasName}}<div class="name-band"{{if $.BackgroundImageSrc}} style="opacity:0.82;"{{end}}>{{.ChildName}}</div>{{else}}<div class="name-band-placeholder">Child name — optional, add it in the form</div>{{end}}
     <div class="token-row"{{if .BackgroundImageSrc}} style="opacity:0.82;"{{end}}>
@@ -644,6 +655,7 @@ const previewHTML = `<!DOCTYPE html>
       <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
       <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
       {{range $i, $v := .CustomTokenDataFields}}<input type="hidden" name="custom_token_data_{{$i}}" value="{{$v}}">{{end}}
+      {{range $i, $v := .CustomTokenNameFields}}<input type="hidden" name="custom_token_name_{{$i}}" value="{{$v}}">{{end}}
       <button type="submit" class="dl-btn">&#8595; Download PDF</button>
     </form>
     <form method="POST" action="/">
@@ -662,6 +674,7 @@ const previewHTML = `<!DOCTYPE html>
       <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
       <input type="hidden" name="reward_image_prompt" value="{{.RewardImagePrompt}}">
       {{range $i, $v := .CustomTokenDataFields}}<input type="hidden" name="custom_token_data_{{$i}}" value="{{$v}}">{{end}}
+      {{range $i, $v := .CustomTokenNameFields}}<input type="hidden" name="custom_token_name_{{$i}}" value="{{$v}}">{{end}}
       <button type="submit" class="back-btn">&#8592; Edit Board</button>
     </form>
   </div>
@@ -709,6 +722,7 @@ type previewData struct {
 	BackgroundImageData   string       // URL-safe base64 background image (for hidden field passthrough)
 	BackgroundImageSrc    template.URL // data: URL for CSS background display in preview
 	CustomTokenDataFields []string     // URL-safe base64 strings, one per custom:N token
+	CustomTokenNameFields []string     // names for custom:N tokens, parallel to CustomTokenDataFields
 }
 
 type previewTheme struct {
@@ -867,6 +881,12 @@ func handleForm(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.Marshal(customTokens)
 	fd.CustomTokensJSON = template.JS(b)
+	var customNames []string
+	for i := range customTokens {
+		customNames = append(customNames, r.FormValue(fmt.Sprintf("custom_token_name_%d", i)))
+	}
+	nb, _ := json.Marshal(customNames)
+	fd.CustomTokenNamesJSON = template.JS(nb)
 	tsJSON, _ := json.Marshal(fd.TokenStyle)
 	fd.TokenStyleJSON = template.JS(tsJSON)
 
@@ -994,10 +1014,12 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		bgImgSrc = imageDataURL(bgBytes)
 	}
 
-	// Build CustomTokenDataFields for hidden field passthrough.
+	// Build CustomTokenDataFields and CustomTokenNameFields for hidden field passthrough.
 	var customTokenDataFields []string
-	for _, b := range cfg.CustomTokenImages {
+	var customTokenNameFields []string
+	for i, b := range cfg.CustomTokenImages {
 		customTokenDataFields = append(customTokenDataFields, base64.URLEncoding.EncodeToString(b))
+		customTokenNameFields = append(customTokenNameFields, r.FormValue(fmt.Sprintf("custom_token_name_%d", i)))
 	}
 
 	data := previewData{
@@ -1023,6 +1045,7 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		BackgroundImageData:   bgImgData,
 		BackgroundImageSrc:    bgImgSrc,
 		CustomTokenDataFields: customTokenDataFields,
+		CustomTokenNameFields: customTokenNameFields,
 	}
 
 	var buf bytes.Buffer
