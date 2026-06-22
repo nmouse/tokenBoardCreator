@@ -10,12 +10,33 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/owner/tokenBoardCreator/internal/assets"
 	"github.com/owner/tokenBoardCreator/internal/board"
 	"github.com/owner/tokenBoardCreator/internal/imagegen"
 )
+
+var (
+	hfTokenMu     sync.RWMutex
+	storedHFToken string
+)
+
+func getStoredHFToken() string {
+	hfTokenMu.RLock()
+	defer hfTokenMu.RUnlock()
+	return storedHFToken
+}
+
+func setStoredHFToken(t string) {
+	hfTokenMu.Lock()
+	defer hfTokenMu.Unlock()
+	storedHFToken = t
+}
 
 const formHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -36,7 +57,10 @@ const formHTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>Token Board Creator</h1>
+<div style="display:flex;align-items:baseline;justify-content:space-between;">
+  <h1>Token Board Creator</h1>
+  <a href="/settings" style="color:#888;font-size:13px;text-decoration:none;">&#9881; Settings</a>
+</div>
 <form method="POST" action="/preview" enctype="multipart/form-data">
   <label>Child Name (optional)
     <input type="text" name="name" placeholder="e.g. Alex" value="{{.Name}}">
@@ -86,7 +110,7 @@ const formHTML = `<!DOCTYPE html>
   <label>Custom Title
     <input type="text" name="title" placeholder="I am working for:" value="{{.Title}}">
   </label>
-  <label>Background Scene <span style="font-weight:normal;color:#888">(optional — requires HF_TOKEN env var; ~10–30 sec on download)</span>
+  <label>Background Scene <span style="font-weight:normal;color:#888">(optional — requires Hugging Face token; set in <a href="/settings">Settings</a>; ~10–30 sec)</span>
     <input type="text" name="background_prompt" placeholder="e.g. dinosaurs in space, rainbow forest" value="{{.BackgroundPrompt}}">
   </label>
   <div class="btn-row">
@@ -125,6 +149,66 @@ type formData struct {
 }
 
 var formTmpl = template.Must(template.New("form").Parse(formHTML))
+
+const settingsHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — Token Board Creator</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; background: #f9f9f9; }
+  h1 { color: #333; }
+  label { display: block; margin-top: 12px; font-weight: bold; color: #555; }
+  input[type=password] { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; }
+  .hint { font-size: 13px; color: #777; margin-top: 6px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; }
+  .badge-set { background: #d4edda; color: #155724; }
+  .badge-unset { background: #fff3cd; color: #856404; }
+  .btn-row { margin-top: 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  .btn-save { background: #1565C0; color: white; }
+  .btn-clear { background: #c62828; color: white; }
+  .back { color: #1565C0; font-size: 14px; text-decoration: none; }
+  button:hover { opacity: 0.85; }
+  p { color: #555; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>Settings</h1>
+<p>A Hugging Face API token is only needed for AI-generated backgrounds. It is stored in memory for this session — you will need to re-enter it if you restart the app.</p>
+<p>Status: {{if .TokenSet}}<span class="badge badge-set">&#10003; Token saved for this session</span>{{else}}<span class="badge badge-unset">Not set</span>{{end}}</p>
+<form method="POST" action="/settings">
+  <label>Hugging Face API Token
+    <input type="password" name="hf_token" placeholder="hf_..." autocomplete="off">
+  </label>
+  <p class="hint">Get a free token at <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a> — read access is sufficient.</p>
+  <p id="save-msg" style="display:none;color:#c62828;font-size:13px;margin:8px 0 0;"></p>
+  <div class="btn-row">
+    <button type="submit" name="action" value="save" class="btn-save">Save</button>
+    {{if .TokenSet}}<button type="submit" name="action" value="clear" class="btn-clear">Clear</button>{{end}}
+    <a href="/" class="back">&#8592; Back to form</a>
+  </div>
+</form>
+<script>
+  var tokenInput = document.querySelector('input[name="hf_token"]');
+  var saveMsg = document.getElementById('save-msg');
+  document.querySelector('form').addEventListener('submit', function(e) {
+    if (e.submitter && e.submitter.value === 'save' && tokenInput.value.trim() === '') {
+      e.preventDefault();
+      saveMsg.textContent = 'Please enter a token before saving.';
+      saveMsg.style.display = 'block';
+      tokenInput.focus();
+    }
+  });
+  tokenInput.addEventListener('input', function() {
+    saveMsg.style.display = 'none';
+  });
+</script>
+</body>
+</html>`
+
+var settingsTmpl = template.Must(template.New("settings").Parse(settingsHTML))
 
 const previewHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -248,6 +332,8 @@ func WebServer(ctx context.Context, port int) error {
 	mux.HandleFunc("POST /", handleForm)
 	mux.HandleFunc("POST /preview", handlePreview)
 	mux.HandleFunc("POST /generate", handleGenerate)
+	mux.HandleFunc("GET /settings", handleSettings)
+	mux.HandleFunc("POST /settings", handleSettings)
 
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: mux}
@@ -257,11 +343,48 @@ func WebServer(ctx context.Context, port int) error {
 		_ = srv.Shutdown(context.Background())
 	}()
 
-	fmt.Printf("Token Board Creator listening on http://localhost%s\n", addr)
+	url := fmt.Sprintf("http://localhost%s", addr)
+	fmt.Printf("Token Board Creator listening on %s\n", url)
+	go openBrowser(url)
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("web server: %w", err)
 	}
 	return nil
+}
+
+// openBrowser opens the default system browser to the given URL.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/C", "start", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
+}
+
+func handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		if r.FormValue("action") == "clear" {
+			setStoredHFToken("")
+		} else if token := strings.TrimSpace(r.FormValue("hf_token")); token != "" {
+			setStoredHFToken(token)
+		}
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
+	data := struct{ TokenSet bool }{TokenSet: getStoredHFToken() != ""}
+	var buf bytes.Buffer
+	if err := settingsTmpl.Execute(&buf, data); err != nil {
+		http.Error(w, "Template error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
 }
 
 func handleForm(w http.ResponseWriter, r *http.Request) {
@@ -370,8 +493,11 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 			// No cached image — generate one now.
 			apiToken := os.Getenv("HF_TOKEN")
 			if apiToken == "" {
+				apiToken = getStoredHFToken()
+			}
+			if apiToken == "" {
 				writeHTMLError(w, http.StatusBadRequest,
-					"HF_TOKEN environment variable is not set on this server.\nRestart the server with HF_TOKEN set to use AI background generation.\nGet a free token at https://huggingface.co/settings/tokens")
+					"No Hugging Face API token configured.\nGo to Settings (top-right) to enter your token.\nGet a free token at https://huggingface.co/settings/tokens")
 				return
 			}
 			generated, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
