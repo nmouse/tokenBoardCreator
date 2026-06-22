@@ -45,7 +45,8 @@ func run() error {
 		cfg.TokenStyles = strings.Split(tokenStylesFlag, ",")
 	}
 
-	if web {
+	// Default to web mode when launched with no arguments (e.g. double-click on Windows).
+	if web || len(os.Args) == 1 {
 		return render.WebServer(context.Background(), cfg.WebPort)
 	}
 
