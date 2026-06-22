@@ -4,6 +4,7 @@ package board
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,7 @@ type Config struct {
 	WebPort              int
 	BackgroundPrompt     string
 	BackgroundImageBytes []byte
+	CustomTokenImages    [][]byte // indexed by N in "custom:N" style values
 }
 
 // Layout constants define the proportional zones of the page.
@@ -140,6 +142,20 @@ func validateTokenStyle(style string) error {
 // IsBuiltinStyle reports whether the style uses fpdf primitives.
 func IsBuiltinStyle(style string) bool {
 	return builtinTokenStyles[style]
+}
+
+// IsCustomStyle reports whether the style refers to a user-uploaded or AI-generated custom token image.
+func IsCustomStyle(style string) bool {
+	return strings.HasPrefix(style, "custom:")
+}
+
+// CustomStyleIndex returns the 0-based index encoded in a "custom:N" style string.
+func CustomStyleIndex(style string) (int, bool) {
+	if !IsCustomStyle(style) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(style, "custom:"))
+	return n, err == nil
 }
 
 // IsPNGAssetStyle reports whether the style refers to an embedded PNG asset.

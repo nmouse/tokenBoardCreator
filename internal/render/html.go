@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -54,6 +55,9 @@ const formHTML = `<!DOCTYPE html>
   .btn-preview { background: #1565C0; color: white; }
   .btn-download { background: #2E7D32; color: white; }
   button:hover { opacity: 0.85; }
+  .mode-toggle { display: flex; gap: 16px; margin: 6px 0 4px; }
+  .mode-toggle label { display: flex; align-items: center; gap: 4px; font-weight: normal; cursor: pointer; margin: 0; }
+  .mode-toggle input[type=radio] { width: auto; margin: 0; }
 </style>
 </head>
 <body>
@@ -61,18 +65,31 @@ const formHTML = `<!DOCTYPE html>
   <h1>Token Board Creator</h1>
   <a href="/settings" style="color:#888;font-size:13px;text-decoration:none;">&#9881; Settings</a>
 </div>
+<script>var _restoredTokens={{.CustomTokensJSON}};var _hasRewardPrompt={{if .RewardImagePrompt}}true{{else}}false{{end}};var _restoredTokenStyle={{.TokenStyleJSON}};</script>
 <form method="POST" action="/preview" enctype="multipart/form-data">
   <label>Child Name (optional)
     <input type="text" name="name" placeholder="e.g. Alex" value="{{.Name}}">
   </label>
-  <label>Reward Text <span style="font-weight:normal;color:#888">(optional if uploading image below)</span>
+  <label>Reward Text <span style="font-weight:normal;color:#888">(optional if using reward image below)</span>
     <input type="text" name="reward" placeholder="e.g. iPad time" value="{{.Reward}}">
   </label>
-  <label>Reward Image <span style="font-weight:normal;color:#888">(optional — replaces reward text)</span>
-    {{if .RewardImageSrc}}<div style="margin-top:4px"><img src="{{.RewardImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace</small></div>{{end}}
-    <input type="file" name="reward_image" accept="image/*" style="padding:4px 0;">
+  <label>Reward Image <span style="font-weight:normal;color:#888">(optional — replaces reward text)</span></label>
+  <div style="margin-top:4px;">
+    <div class="mode-toggle">
+      <label><input type="radio" name="reward_image_mode" value="upload" id="ri_mode_upload" onchange="rewardModeChange()" checked> Upload</label>
+      <label><input type="radio" name="reward_image_mode" value="ai" id="ri_mode_ai" onchange="rewardModeChange()"> AI Generate</label>
+    </div>
+    <div id="ri_upload_section">
+      {{if .RewardImageSrc}}<div style="margin-bottom:4px;"><img src="{{.RewardImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace</small></div>{{end}}
+      <input type="file" name="reward_image" accept="image/*" style="padding:4px 0;">
+    </div>
+    <div id="ri_ai_section" style="display:none;">
+      <input type="text" name="reward_image_prompt" placeholder="e.g. ice cream cone, golden trophy" value="{{.RewardImagePrompt}}">
+      {{if .RewardImageSrc}}<div style="margin-top:4px;"><img src="{{.RewardImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"></div>{{end}}
+      <small style="color:#888">Requires Hugging Face token — <a href="/settings">Settings</a></small>
+    </div>
     <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
-  </label>
+  </div>
   <label>Number of Tokens (3–10)
     <input type="number" name="tokens" min="3" max="10" value="{{.Tokens}}" required>
   </label>
@@ -85,7 +102,6 @@ const formHTML = `<!DOCTYPE html>
       <option value="png:star"{{if eq .TokenStyle "png:star"}} selected{{end}}>PNG Star</option>
       <option value="png:smiley"{{if eq .TokenStyle "png:smiley"}} selected{{end}}>PNG Smiley</option>
       <option value="png:thumbsup"{{if eq .TokenStyle "png:thumbsup"}} selected{{end}}>PNG Thumbs Up</option>
-      {{if eq .TokenStyle "custom"}}<option value="custom" selected>Custom Image (uploaded)</option>{{end}}
     </select>
   </label>
   <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-weight:bold;color:#555;">
@@ -94,11 +110,27 @@ const formHTML = `<!DOCTYPE html>
   </label>
   <div id="slot-styles-container"></div>
   <input type="hidden" id="token_styles_data" value="{{.TokenStylesData}}">
-  <label id="custom-token-image-label">Custom Token Image <span style="font-weight:normal;color:#888">(optional — overrides token style)</span>
-    {{if .TokenImageSrc}}<div style="margin-top:4px"><img src="{{.TokenImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace, or select a different style above</small></div>{{end}}
-    <input type="file" name="token_image" accept="image/*" style="padding:4px 0;">
-    <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
-  </label>
+  <div id="add-custom-token-section" style="border:1px solid #ddd;border-radius:6px;padding:10px 12px;margin-top:12px;background:#fafafa;">
+    <strong style="color:#555;font-size:14px;">Add Custom Token</strong>
+    <div class="mode-toggle" style="margin-top:6px;">
+      <label><input type="radio" name="add_token_mode" value="upload" id="at_mode_upload" onchange="addCustomTokenMode()" checked> Upload File</label>
+      <label><input type="radio" name="add_token_mode" value="ai" id="at_mode_ai" onchange="addCustomTokenMode()"> AI Generate</label>
+    </div>
+    <div id="at_upload_section">
+      <input type="file" id="at_file" accept="image/*" style="padding:4px 0;">
+    </div>
+    <div id="at_ai_section" style="display:none;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="at_prompt" placeholder="e.g. golden star trophy, rocket ship" style="flex:1;margin:0;">
+        <button type="button" id="at_gen_btn" onclick="generateCustomToken()" style="padding:8px 12px;background:#1565C0;color:white;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;font-size:13px;">Generate</button>
+      </div>
+      <span id="at_gen_status" style="font-size:12px;color:#888;margin-top:4px;display:block;"></span>
+      <small style="color:#888;">Requires Hugging Face token — <a href="/settings">Settings</a></small>
+    </div>
+    <div id="at_preview" style="margin-top:6px;"></div>
+    <button type="button" onclick="addCustomToken()" style="margin-top:6px;padding:6px 14px;background:#2E7D32;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">+ Add to Token List</button>
+    <div id="custom-token-hidden-fields"></div>
+  </div>
   <label>Theme
     <select name="theme">
       <option value="default"{{if eq .Theme "default"}} selected{{end}}>Default</option>
@@ -118,34 +150,56 @@ const formHTML = `<!DOCTYPE html>
   <label>Custom Title
     <input type="text" name="title" placeholder="I am working for:" value="{{.Title}}">
   </label>
-  <label>Background Scene <span style="font-weight:normal;color:#888">(optional — requires Hugging Face token; set in <a href="/settings">Settings</a>; ~10–30 sec)</span>
-    <input type="text" name="background_prompt" placeholder="e.g. dinosaurs in space, rainbow forest" value="{{.BackgroundPrompt}}">
-  </label>
+  <label>Background Scene <span style="font-weight:normal;color:#888">(optional)</span></label>
+  <div style="margin-top:4px;">
+    <div class="mode-toggle">
+      <label><input type="radio" name="background_mode" value="ai" id="bg_mode_ai" onchange="bgModeChange()" checked> AI Generate</label>
+      <label><input type="radio" name="background_mode" value="upload" id="bg_mode_upload" onchange="bgModeChange()"> Upload File</label>
+    </div>
+    <div id="bg_ai_section">
+      <input type="text" name="background_prompt" placeholder="e.g. dinosaurs in space, rainbow forest" value="{{.BackgroundPrompt}}">
+      <small style="color:#888">Requires Hugging Face token — <a href="/settings">Settings</a> &middot; ~10&ndash;30 sec</small>
+    </div>
+    <div id="bg_upload_section" style="display:none;">
+      {{if .BackgroundImageSrc}}<div style="margin-bottom:4px;"><img src="{{.BackgroundImageSrc}}" style="max-height:60px;border:1px solid #ccc;border-radius:4px;"><br><small style="color:#888">Uploaded — choose a new file to replace</small></div>{{end}}
+      <input type="file" name="background_image" accept="image/*" style="padding:4px 0;">
+    </div>
+    <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
+  </div>
   <div class="btn-row">
     <button type="submit" class="btn-preview">Preview</button>
   </div>
 </form>
 <div id="ai-loading" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-family:Arial,sans-serif;font-size:18px;gap:16px;">
   <div style="width:48px;height:48px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;"></div>
-  Generating AI background&hellip; (~10&ndash;30 sec)
+  Generating AI image&hellip; (~10&ndash;30 sec)
 </div>
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script>
 (function() {
-  var styleOptions = [
-    {value:'star', label:'Star'},
-    {value:'circle', label:'Circle'},
-    {value:'smiley', label:'Smiley'},
-    {value:'thumbsup', label:'Thumbs Up'},
-    {value:'png:star', label:'PNG Star'},
-    {value:'png:smiley', label:'PNG Smiley'},
-    {value:'png:thumbsup', label:'PNG Thumbs Up'},
-  ];
+  var customTokens = [];
+  var pendingCustomImage = null;
+
+  function buildStyleOptions() {
+    var base = [
+      {value:'star', label:'Star'},
+      {value:'circle', label:'Circle'},
+      {value:'smiley', label:'Smiley'},
+      {value:'thumbsup', label:'Thumbs Up'},
+      {value:'png:star', label:'PNG Star'},
+      {value:'png:smiley', label:'PNG Smiley'},
+      {value:'png:thumbsup', label:'PNG Thumbs Up'},
+    ];
+    customTokens.forEach(function(_, i) {
+      base.push({value: 'custom:' + i, label: 'Custom ' + (i + 1)});
+    });
+    return base;
+  }
 
   function updateSlotDropdowns() {
     var checked = document.getElementById('individual_styles').checked;
     document.getElementById('global-token-style-label').style.display = checked ? 'none' : '';
-    document.getElementById('custom-token-image-label').style.display = checked ? 'none' : '';
+    document.getElementById('add-custom-token-section').style.display = checked ? 'none' : '';
 
     var container = document.getElementById('slot-styles-container');
     container.innerHTML = '';
@@ -154,9 +208,10 @@ const formHTML = `<!DOCTYPE html>
     var n = parseInt(document.querySelector('[name="tokens"]').value) || 5;
     var existingRaw = document.getElementById('token_styles_data').value;
     var existing = existingRaw ? existingRaw.split(',') : [];
+    var opts = buildStyleOptions();
 
     for (var i = 0; i < n; i++) {
-      var val = existing[i] || styleOptions[0].value;
+      var val = existing[i] || opts[0].value;
       var wrapper = document.createElement('div');
       wrapper.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;';
       var lbl = document.createElement('span');
@@ -165,7 +220,7 @@ const formHTML = `<!DOCTYPE html>
       var sel = document.createElement('select');
       sel.name = 'token_style_' + (i + 1);
       sel.style.cssText = 'flex:1;margin-top:0;';
-      styleOptions.forEach(function(opt) {
+      opts.forEach(function(opt) {
         var o = document.createElement('option');
         o.value = opt.value;
         o.text = opt.label;
@@ -178,17 +233,173 @@ const formHTML = `<!DOCTYPE html>
     }
   }
 
+  function refreshAllDropdowns() {
+    var globalSel = document.querySelector('[name="token_style"]');
+    if (globalSel) {
+      var currentVal = globalSel.value;
+      var toRemove = [];
+      for (var i = 0; i < globalSel.options.length; i++) {
+        if (globalSel.options[i].value.indexOf('custom:') === 0) toRemove.push(i);
+      }
+      for (var j = toRemove.length - 1; j >= 0; j--) globalSel.remove(toRemove[j]);
+      customTokens.forEach(function(_, i) {
+        var o = document.createElement('option');
+        o.value = 'custom:' + i;
+        o.text = 'Custom ' + (i + 1);
+        globalSel.appendChild(o);
+      });
+      globalSel.value = currentVal;
+    }
+    if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
+  }
+
+  function serializeCustomTokens() {
+    var container = document.getElementById('custom-token-hidden-fields');
+    container.innerHTML = '';
+    customTokens.forEach(function(t, i) {
+      var inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = 'custom_token_data_' + i;
+      inp.value = t.base64;
+      container.appendChild(inp);
+    });
+  }
+
+  function showPendingPreview(dataURL) {
+    document.getElementById('at_preview').innerHTML =
+      '<img src="' + dataURL + '" style="max-height:60px;border:1px solid #ccc;border-radius:4px;margin-top:4px;">';
+  }
+
+  window.addCustomToken = function() {
+    if (!pendingCustomImage) { alert('Choose a file or generate an image first.'); return; }
+    customTokens.push(pendingCustomImage);
+    pendingCustomImage = null;
+    document.getElementById('at_preview').innerHTML = '';
+    var f = document.getElementById('at_file');
+    if (f) f.value = '';
+    refreshAllDropdowns();
+    serializeCustomTokens();
+    var globalSel = document.querySelector('[name="token_style"]');
+    if (globalSel) globalSel.value = 'custom:' + (customTokens.length - 1);
+  };
+
+  window.generateCustomToken = async function() {
+    var prompt = document.getElementById('at_prompt').value.trim();
+    if (!prompt) { alert('Enter a prompt first.'); return; }
+    var btn = document.getElementById('at_gen_btn');
+    var status = document.getElementById('at_gen_status');
+    btn.disabled = true;
+    status.textContent = 'Generating… (~10–30 sec)';
+    try {
+      var resp = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt: prompt})
+      });
+      if (!resp.ok) {
+        var txt = await resp.text();
+        throw new Error(txt || String(resp.status));
+      }
+      var contentType = resp.headers.get('Content-Type') || 'image/png';
+      var buf = await resp.arrayBuffer();
+      var bytes = new Uint8Array(buf);
+      var binary = '';
+      bytes.forEach(function(b) { binary += String.fromCharCode(b); });
+      var b64 = btoa(binary);
+      var urlB64 = b64.replace(/\+/g, '-').replace(/\//g, '_');
+      var dataURL = 'data:' + contentType + ';base64,' + b64;
+      pendingCustomImage = {dataURL: dataURL, base64: urlB64};
+      showPendingPreview(dataURL);
+      status.textContent = 'Done! Click “+ Add to Token List”.';
+    } catch(e) {
+      status.textContent = 'Error: ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  window.rewardModeChange = function() {
+    var upload = document.getElementById('ri_mode_upload').checked;
+    document.getElementById('ri_upload_section').style.display = upload ? '' : 'none';
+    document.getElementById('ri_ai_section').style.display = upload ? 'none' : '';
+  };
+
+  window.bgModeChange = function() {
+    var ai = document.getElementById('bg_mode_ai').checked;
+    document.getElementById('bg_ai_section').style.display = ai ? '' : 'none';
+    document.getElementById('bg_upload_section').style.display = ai ? 'none' : '';
+    if (!ai) {
+      var p = document.querySelector('[name="background_prompt"]');
+      if (p) p.value = '';
+    }
+  };
+
+  window.addCustomTokenMode = function() {
+    var upload = document.getElementById('at_mode_upload').checked;
+    document.getElementById('at_upload_section').style.display = upload ? '' : 'none';
+    document.getElementById('at_ai_section').style.display = upload ? 'none' : '';
+  };
+
   document.getElementById('individual_styles').addEventListener('change', updateSlotDropdowns);
   document.querySelector('[name="tokens"]').addEventListener('input', function() {
     if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
   });
-  if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
+
+  document.getElementById('at_file').addEventListener('change', function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var dataURL = ev.target.result;
+      var b64Part = dataURL.split(',')[1];
+      var urlB64 = b64Part.replace(/\+/g, '-').replace(/\//g, '_');
+      pendingCustomImage = {dataURL: dataURL, base64: urlB64};
+      showPendingPreview(dataURL);
+    };
+    reader.readAsDataURL(file);
+  });
 
   document.querySelector('form').addEventListener('submit', function() {
-    if (document.querySelector('[name="background_prompt"]').value.trim()) {
+    var hasBgPrompt = document.querySelector('[name="background_prompt"]').value.trim();
+    var riAI = document.getElementById('ri_mode_ai');
+    var riPrompt = document.querySelector('[name="reward_image_prompt"]');
+    var hasRewardAI = riAI && riAI.checked && riPrompt && riPrompt.value.trim();
+    if (hasBgPrompt || hasRewardAI) {
       document.getElementById('ai-loading').style.display = 'flex';
     }
   });
+
+  // Page-load initialization.
+  (function init() {
+    if (typeof _restoredTokens !== 'undefined' && _restoredTokens && _restoredTokens.length) {
+      _restoredTokens.forEach(function(b64) {
+        var stdB64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+        customTokens.push({dataURL: 'data:image/png;base64,' + stdB64, base64: b64});
+      });
+      refreshAllDropdowns();
+      serializeCustomTokens();
+      // Re-apply the server-side selected style now that custom:N options exist.
+      if (typeof _restoredTokenStyle !== 'undefined' && _restoredTokenStyle) {
+        var globalSel = document.querySelector('[name="token_style"]');
+        if (globalSel) globalSel.value = _restoredTokenStyle;
+      }
+    }
+    if (document.getElementById('individual_styles').checked) updateSlotDropdowns();
+
+    // Restore background upload mode when there is image data but no prompt.
+    var bgData = document.querySelector('[name="background_image_data"]');
+    var bgPrompt = document.querySelector('[name="background_prompt"]');
+    if (bgData && bgData.value && bgPrompt && !bgPrompt.value) {
+      document.getElementById('bg_mode_upload').checked = true;
+      window.bgModeChange();
+    }
+
+    // Restore reward AI gen mode.
+    if (typeof _hasRewardPrompt !== 'undefined' && _hasRewardPrompt) {
+      document.getElementById('ri_mode_ai').checked = true;
+      window.rewardModeChange();
+    }
+  })();
 })();
 </script>
 </body>
@@ -196,20 +407,23 @@ const formHTML = `<!DOCTYPE html>
 
 // formData holds values for pre-populating the form template.
 type formData struct {
-	Name             string
-	Reward           string
-	Tokens           int
-	TokenStyle       string
-	IndividualStyles bool   // whether per-slot customization is enabled
-	TokenStylesData  string // comma-joined per-slot styles for JS pre-population
-	Theme            string
-	PageSize         string
-	Title            string
-	BackgroundPrompt string
-	RewardImageData  string       // URL-safe base64 reward image for hidden field passthrough
-	RewardImageSrc   template.URL // data: URL for thumbnail preview
-	TokenImageData   string       // URL-safe base64 token image for hidden field passthrough
-	TokenImageSrc    template.URL // data: URL for thumbnail preview
+	Name                string
+	Reward              string
+	Tokens              int
+	TokenStyle          string
+	IndividualStyles    bool   // whether per-slot customization is enabled
+	TokenStylesData     string // comma-joined per-slot styles for JS pre-population
+	Theme               string
+	PageSize            string
+	Title               string
+	BackgroundPrompt    string
+	BackgroundImageData string       // URL-safe base64 background image for hidden field passthrough
+	BackgroundImageSrc  template.URL // data: URL for thumbnail preview
+	RewardImageData     string       // URL-safe base64 reward image for hidden field passthrough
+	RewardImageSrc      template.URL // data: URL for thumbnail preview
+	RewardImagePrompt   string       // AI generation prompt for reward image
+	CustomTokensJSON    template.JS  // JSON array of URL-safe base64 strings for JS restoration
+	TokenStyleJSON      template.JS  // JS string literal of the current token style for restoration
 }
 
 var formTmpl = template.Must(template.New("form").Parse(formHTML))
@@ -240,7 +454,7 @@ const settingsHTML = `<!DOCTYPE html>
 </head>
 <body>
 <h1>Settings</h1>
-<p>A Hugging Face API token is only needed for AI-generated backgrounds. It is stored in memory for this session — you will need to re-enter it if you restart the app.</p>
+<p>A Hugging Face API token is needed for AI-generated images. It is stored in memory for this session — you will need to re-enter it if you restart the app.</p>
 <p>Status: {{if .TokenSet}}<span class="badge badge-set">&#10003; Token saved for this session</span>{{else}}<span class="badge badge-unset">Not set</span>{{end}}</p>
 <form method="POST" action="/settings">
   <label>Hugging Face API Token
@@ -324,7 +538,8 @@ const previewHTML = `<!DOCTYPE html>
     <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
     <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
     <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
-    <button type="submit" class="dl-btn">{{if .BackgroundPrompt}}Download PDF (with AI background){{else}}Download PDF{{end}}</button>
+    {{range $i, $v := .CustomTokenDataFields}}<input type="hidden" name="custom_token_data_{{$i}}" value="{{$v}}">{{end}}
+    <button type="submit" class="dl-btn">Download PDF</button>
   </form>
 </div>
 <form method="POST" action="/" class="back-form">
@@ -341,6 +556,8 @@ const previewHTML = `<!DOCTYPE html>
   <input type="hidden" name="reward_image_data" value="{{.RewardImageData}}">
   <input type="hidden" name="token_image_data" value="{{.TokenImageData}}">
   <input type="hidden" name="background_image_data" value="{{.BackgroundImageData}}">
+  <input type="hidden" name="reward_image_prompt" value="{{.RewardImagePrompt}}">
+  {{range $i, $v := .CustomTokenDataFields}}<input type="hidden" name="custom_token_data_{{$i}}" value="{{$v}}">{{end}}
   <button type="submit" class="back">&#8592; Back to form</button>
 </form>
 </body>
@@ -361,26 +578,28 @@ var tokenEmoji = map[string]string{
 
 // previewData is the data model for the HTML preview template.
 type previewData struct {
-	Title               string
-	RewardText          string
-	ChildName           string
-	HasName             bool
-	Tokens              []string
-	TokenCount          int
-	SlotSize            int
-	TokenStyle          string
-	IndividualStyles    bool   // whether per-slot customization is enabled
-	TokenStylesCSV      string // comma-joined per-slot styles for hidden field passthrough
-	ThemeName           string
-	PageSize            string
-	Theme               previewTheme
-	BackURL             string
-	BackgroundPrompt    string
-	RewardImageData     string       // URL-safe base64 reward image (for hidden field passthrough)
-	RewardImageSrc      template.URL // data: URL for <img src> preview
-	TokenImageData      string       // URL-safe base64 custom token image (for hidden field passthrough)
-	BackgroundImageData string       // URL-safe base64 AI background image (for hidden field passthrough)
-	BackgroundImageSrc  template.URL // data: URL for CSS background display in preview
+	Title                 string
+	RewardText            string
+	ChildName             string
+	HasName               bool
+	Tokens                []template.HTML
+	TokenCount            int
+	SlotSize              int
+	TokenStyle            string
+	IndividualStyles      bool   // whether per-slot customization is enabled
+	TokenStylesCSV        string // comma-joined per-slot styles for hidden field passthrough
+	ThemeName             string
+	PageSize              string
+	Theme                 previewTheme
+	BackURL               string
+	BackgroundPrompt      string
+	RewardImageData       string       // URL-safe base64 reward image (for hidden field passthrough)
+	RewardImageSrc        template.URL // data: URL for <img src> preview
+	RewardImagePrompt     string       // AI generation prompt for reward image (for round-trip)
+	TokenImageData        string       // URL-safe base64 custom token image (for hidden field passthrough)
+	BackgroundImageData   string       // URL-safe base64 background image (for hidden field passthrough)
+	BackgroundImageSrc    template.URL // data: URL for CSS background display in preview
+	CustomTokenDataFields []string     // URL-safe base64 strings, one per custom:N token
 }
 
 type previewTheme struct {
@@ -404,6 +623,7 @@ func WebServer(ctx context.Context, port int) error {
 	mux.HandleFunc("POST /generate", handleGenerate)
 	mux.HandleFunc("GET /settings", handleSettings)
 	mux.HandleFunc("POST /settings", handleSettings)
+	mux.HandleFunc("POST /api/generate-image", handleGenerateImage)
 
 	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: mux}
@@ -457,6 +677,33 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	w.Write(buf.Bytes())
 }
 
+// handleGenerateImage generates an image from a text prompt via the Hugging Face API.
+func handleGenerateImage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Prompt) == "" {
+		http.Error(w, "prompt required", http.StatusBadRequest)
+		return
+	}
+	apiToken := os.Getenv("HF_TOKEN")
+	if apiToken == "" {
+		apiToken = getStoredHFToken()
+	}
+	if apiToken == "" {
+		http.Error(w, "no Hugging Face API token configured — go to Settings", http.StatusUnauthorized)
+		return
+	}
+	imgBytes, err := imagegen.Generate(r.Context(), req.Prompt, apiToken)
+	if err != nil {
+		http.Error(w, "image generation failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	mime := http.DetectContentType(imgBytes)
+	w.Header().Set("Content-Type", mime)
+	w.Write(imgBytes)
+}
+
 func handleForm(w http.ResponseWriter, r *http.Request) {
 	tokens, _ := strconv.Atoi(r.FormValue("tokens"))
 	if tokens == 0 {
@@ -475,30 +722,45 @@ func handleForm(w http.ResponseWriter, r *http.Request) {
 		pageSize = "letter"
 	}
 	fd := formData{
-		Name:             r.FormValue("name"),
-		Reward:           r.FormValue("reward"),
-		Tokens:           tokens,
-		TokenStyle:       tokenStyle,
-		IndividualStyles: r.FormValue("individual_styles") == "on",
-		TokenStylesData:  r.FormValue("token_styles"),
-		Theme:            theme,
-		PageSize:         pageSize,
-		Title:            r.FormValue("title"),
-		BackgroundPrompt: r.FormValue("background_prompt"),
+		Name:              r.FormValue("name"),
+		Reward:            r.FormValue("reward"),
+		Tokens:            tokens,
+		TokenStyle:        tokenStyle,
+		IndividualStyles:  r.FormValue("individual_styles") == "on",
+		TokenStylesData:   r.FormValue("token_styles"),
+		Theme:             theme,
+		PageSize:          pageSize,
+		Title:             r.FormValue("title"),
+		BackgroundPrompt:  r.FormValue("background_prompt"),
+		RewardImagePrompt: r.FormValue("reward_image_prompt"),
 	}
-	// Restore uploaded images when navigating back from preview.
+	// Restore uploaded/generated images when navigating back from preview.
 	fd.RewardImageData = r.FormValue("reward_image_data")
 	if fd.RewardImageData != "" {
 		if b, err := base64.URLEncoding.DecodeString(fd.RewardImageData); err == nil && len(b) > 0 {
 			fd.RewardImageSrc = imageDataURL(b)
 		}
 	}
-	fd.TokenImageData = r.FormValue("token_image_data")
-	if fd.TokenImageData != "" {
-		if b, err := base64.URLEncoding.DecodeString(fd.TokenImageData); err == nil && len(b) > 0 {
-			fd.TokenImageSrc = imageDataURL(b)
+	fd.BackgroundImageData = r.FormValue("background_image_data")
+	if fd.BackgroundImageData != "" {
+		if b, err := base64.URLEncoding.DecodeString(fd.BackgroundImageData); err == nil && len(b) > 0 {
+			fd.BackgroundImageSrc = imageDataURL(b)
 		}
 	}
+	// Restore custom token images for JS re-initialization.
+	var customTokens []string
+	for i := 0; ; i++ {
+		v := r.FormValue(fmt.Sprintf("custom_token_data_%d", i))
+		if v == "" {
+			break
+		}
+		customTokens = append(customTokens, v)
+	}
+	b, _ := json.Marshal(customTokens)
+	fd.CustomTokensJSON = template.JS(b)
+	tsJSON, _ := json.Marshal(fd.TokenStyle)
+	fd.TokenStyleJSON = template.JS(tsJSON)
+
 	var buf bytes.Buffer
 	if err := formTmpl.Execute(&buf, fd); err != nil {
 		http.Error(w, "Template error: "+err.Error(), http.StatusInternalServerError)
@@ -521,17 +783,27 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokens := make([]string, cfg.TokenCount)
+	// Build token display — custom:N styles show as inline images.
+	tokens := make([]template.HTML, cfg.TokenCount)
 	for i := range tokens {
 		style := cfg.TokenStyle
 		if len(cfg.TokenStyles) == cfg.TokenCount {
 			style = cfg.TokenStyles[i]
 		}
-		e := tokenEmoji[style]
-		if e == "" {
-			e = "⬜"
+		if idx, ok := board.CustomStyleIndex(style); ok {
+			if idx < len(cfg.CustomTokenImages) && len(cfg.CustomTokenImages[idx]) > 0 {
+				src := imageDataURL(cfg.CustomTokenImages[idx])
+				tokens[i] = template.HTML(`<img src="` + string(src) + `" style="max-width:100%;max-height:100%;">`)
+			} else {
+				tokens[i] = template.HTML("⬜")
+			}
+		} else {
+			e := tokenEmoji[style]
+			if e == "" {
+				e = "⬜"
+			}
+			tokens[i] = template.HTML(e)
 		}
-		tokens[i] = e
 	}
 
 	indStyles := len(cfg.TokenStyles) == cfg.TokenCount
@@ -557,22 +829,10 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 	n := cfg.TokenCount
 	slotSize := (648 - 12*(n-1)) / n
 
+	// Resolve reward image — upload, cached data, or AI generation.
 	rewardImgBytes, _ := resolveImageData(r, "reward_image", "reward_image_data")
-	rewardImgData := base64.URLEncoding.EncodeToString(rewardImgBytes)
-	var rewardImgSrc template.URL
-	if len(rewardImgBytes) > 0 {
-		rewardImgSrc = imageDataURL(rewardImgBytes)
-	}
-	tokenImgBytes, _ := resolveImageData(r, "token_image", "token_image_data")
-	tokenImgData := base64.URLEncoding.EncodeToString(tokenImgBytes)
-
-	// Generate (or reuse cached) AI background image.
-	var bgImgData string
-	var bgImgSrc template.URL
-	if cfg.BackgroundPrompt != "" {
-		bgBytes, _ := resolveImageData(r, "", "background_image_data")
-		if len(bgBytes) == 0 {
-			// No cached image — generate one now.
+	if len(rewardImgBytes) == 0 {
+		if prompt := strings.TrimSpace(r.FormValue("reward_image_prompt")); prompt != "" {
 			apiToken := os.Getenv("HF_TOKEN")
 			if apiToken == "" {
 				apiToken = getStoredHFToken()
@@ -582,38 +842,78 @@ func handlePreview(w http.ResponseWriter, r *http.Request) {
 					"No Hugging Face API token configured.\nGo to Settings (top-right) to enter your token.\nGet a free token at https://huggingface.co/settings/tokens")
 				return
 			}
-			generated, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
+			generated, err := imagegen.Generate(r.Context(), prompt, apiToken)
 			if err != nil {
-				writeHTMLError(w, http.StatusBadGateway, "Background image generation failed: "+err.Error())
+				writeHTMLError(w, http.StatusBadGateway, "Reward image generation failed: "+err.Error())
 				return
 			}
-			bgBytes = generated
+			rewardImgBytes = generated
 		}
+	}
+	rewardImgData := base64.URLEncoding.EncodeToString(rewardImgBytes)
+	var rewardImgSrc template.URL
+	if len(rewardImgBytes) > 0 {
+		rewardImgSrc = imageDataURL(rewardImgBytes)
+	}
+
+	tokenImgBytes, _ := resolveImageData(r, "token_image", "token_image_data")
+	tokenImgData := base64.URLEncoding.EncodeToString(tokenImgBytes)
+
+	// Resolve background image — upload, cached data, or AI generation.
+	var bgImgData string
+	var bgImgSrc template.URL
+	bgBytes, _ := resolveImageData(r, "background_image", "background_image_data")
+	if len(bgBytes) == 0 && cfg.BackgroundPrompt != "" {
+		apiToken := os.Getenv("HF_TOKEN")
+		if apiToken == "" {
+			apiToken = getStoredHFToken()
+		}
+		if apiToken == "" {
+			writeHTMLError(w, http.StatusBadRequest,
+				"No Hugging Face API token configured.\nGo to Settings (top-right) to enter your token.\nGet a free token at https://huggingface.co/settings/tokens")
+			return
+		}
+		generated, err := imagegen.Generate(r.Context(), cfg.BackgroundPrompt, apiToken)
+		if err != nil {
+			writeHTMLError(w, http.StatusBadGateway, "Background image generation failed: "+err.Error())
+			return
+		}
+		bgBytes = generated
+	}
+	if len(bgBytes) > 0 {
 		bgImgData = base64.URLEncoding.EncodeToString(bgBytes)
 		bgImgSrc = imageDataURL(bgBytes)
 	}
 
+	// Build CustomTokenDataFields for hidden field passthrough.
+	var customTokenDataFields []string
+	for _, b := range cfg.CustomTokenImages {
+		customTokenDataFields = append(customTokenDataFields, base64.URLEncoding.EncodeToString(b))
+	}
+
 	data := previewData{
-		Title:               cfg.Title,
-		RewardText:          cfg.RewardText,
-		ChildName:           cfg.ChildName,
-		HasName:             cfg.ChildName != "",
-		Tokens:              tokens,
-		TokenCount:          cfg.TokenCount,
-		SlotSize:            slotSize,
-		TokenStyle:          cfg.TokenStyle,
-		IndividualStyles:    indStyles,
-		TokenStylesCSV:      tokenStylesCSV,
-		ThemeName:           cfg.Theme,
-		PageSize:            cfg.PageSize,
-		Theme:               themeData,
-		BackURL:             "/?" + backParams.Encode(),
-		BackgroundPrompt:    cfg.BackgroundPrompt,
-		RewardImageData:     rewardImgData,
-		RewardImageSrc:      rewardImgSrc,
-		TokenImageData:      tokenImgData,
-		BackgroundImageData: bgImgData,
-		BackgroundImageSrc:  bgImgSrc,
+		Title:                 cfg.Title,
+		RewardText:            cfg.RewardText,
+		ChildName:             cfg.ChildName,
+		HasName:               cfg.ChildName != "",
+		Tokens:                tokens,
+		TokenCount:            cfg.TokenCount,
+		SlotSize:              slotSize,
+		TokenStyle:            cfg.TokenStyle,
+		IndividualStyles:      indStyles,
+		TokenStylesCSV:        tokenStylesCSV,
+		ThemeName:             cfg.Theme,
+		PageSize:              cfg.PageSize,
+		Theme:                 themeData,
+		BackURL:               "/?" + backParams.Encode(),
+		BackgroundPrompt:      cfg.BackgroundPrompt,
+		RewardImageData:       rewardImgData,
+		RewardImageSrc:        rewardImgSrc,
+		RewardImagePrompt:     r.FormValue("reward_image_prompt"),
+		TokenImageData:        tokenImgData,
+		BackgroundImageData:   bgImgData,
+		BackgroundImageSrc:    bgImgSrc,
+		CustomTokenDataFields: customTokenDataFields,
 	}
 
 	var buf bytes.Buffer
@@ -678,7 +978,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		cfg.TokenStyle = tmpPath
 	}
 
-	if cfg.BackgroundPrompt != "" {
+	if r.FormValue("background_image_data") != "" {
 		imgBytes, err := resolveImageData(r, "", "background_image_data")
 		if err != nil || len(imgBytes) == 0 {
 			writeHTMLError(w, http.StatusBadRequest, "Background image data missing — go back and regenerate the preview.")
@@ -708,7 +1008,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 // configFromForm parses and validates a Config from an HTTP form submission.
 func configFromForm(r *http.Request) (board.Config, error) {
-	if err := r.ParseMultipartForm(10 << 20); err != nil && err != http.ErrNotMultipart {
+	if err := r.ParseMultipartForm(32 << 20); err != nil && err != http.ErrNotMultipart {
 		return board.Config{}, fmt.Errorf("parsing form: %w", err)
 	}
 
@@ -725,13 +1025,27 @@ func configFromForm(r *http.Request) (board.Config, error) {
 		BackgroundPrompt: r.FormValue("background_prompt"),
 	}
 
-	// Sentinels let Validate() pass when images are provided via upload.
-	if r.FormValue("reward_image_data") != "" || hasUpload(r, "reward_image") {
+	// Sentinels let Validate() pass when images are provided via upload or AI gen prompt.
+	if r.FormValue("reward_image_data") != "" || hasUpload(r, "reward_image") || r.FormValue("reward_image_prompt") != "" {
 		cfg.RewardImage = "uploaded"
 	}
-	// Only apply custom token image when individual styles are not active.
+	// Only apply custom token image when individual styles are not active (legacy "custom" path).
 	if !individualStyles && (hasUpload(r, "token_image") || (r.FormValue("token_style") == "custom" && r.FormValue("token_image_data") != "")) {
 		cfg.TokenStyle = "custom"
+	}
+
+	// Parse custom token images from hidden fields (indexed by position = custom:N index).
+	for i := 0; ; i++ {
+		val := r.FormValue(fmt.Sprintf("custom_token_data_%d", i))
+		if val == "" {
+			break
+		}
+		b, err := base64.URLEncoding.DecodeString(val)
+		if err == nil && len(b) > 0 {
+			cfg.CustomTokenImages = append(cfg.CustomTokenImages, b)
+		} else {
+			cfg.CustomTokenImages = append(cfg.CustomTokenImages, nil)
+		}
 	}
 
 	// Read per-slot styles when individual customization is enabled.

@@ -168,7 +168,7 @@ func PDF(ctx context.Context, cfg board.Config) error {
 
 		// Draw token centered inside slot with padding.
 		pad := 4.0
-		if err := drawToken(pdf, slotStyle(cfg, i), slotX+pad, slotY+pad, slotW-2*pad, slotH-2*pad, theme); err != nil {
+		if err := drawToken(pdf, slotStyle(cfg, i), slotX+pad, slotY+pad, slotW-2*pad, slotH-2*pad, theme, cfg.CustomTokenImages); err != nil {
 			// Non-fatal: leave slot empty on token draw error.
 			_ = err
 		}
@@ -201,7 +201,7 @@ func slotStyle(cfg board.Config, i int) string {
 
 // drawToken dispatches to the appropriate renderer for the given style.
 // x, y, w, h are the bounding box in mm.
-func drawToken(pdf *fpdf.Fpdf, style string, x, y, w, h float64, theme assets.Theme) error {
+func drawToken(pdf *fpdf.Fpdf, style string, x, y, w, h float64, theme assets.Theme, customImages [][]byte) error {
 	switch {
 	case board.IsBuiltinStyle(style):
 		return drawBuiltinToken(pdf, style, x, y, w, h, theme)
@@ -212,6 +212,12 @@ func drawToken(pdf *fpdf.Fpdf, style string, x, y, w, h float64, theme assets.Th
 			return fmt.Errorf("loading embedded token PNG %q: %w", name, err)
 		}
 		return drawPNGTokenFromBytes(pdf, data, name, x, y, w, h)
+	case board.IsCustomStyle(style):
+		idx, ok := board.CustomStyleIndex(style)
+		if !ok || idx >= len(customImages) || len(customImages[idx]) == 0 {
+			return fmt.Errorf("custom token image %q not available", style)
+		}
+		return drawPNGTokenFromBytes(pdf, customImages[idx], fmt.Sprintf("custom%d", idx), x, y, w, h)
 	default:
 		// Treat style as a disk path.
 		return placeImage(pdf, style, x, y, w, h, true)
