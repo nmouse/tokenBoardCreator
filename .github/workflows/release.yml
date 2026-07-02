@@ -24,11 +24,17 @@ jobs:
           GOOS=darwin  GOARCH=arm64 go build -o tokenBoardCreator-darwin-arm64 .
           GOOS=linux   GOARCH=amd64 go build -o tokenBoardCreator-linux-amd64 .
 
+      - name: Package macOS binaries
+        run: |
+          chmod +x tokenBoardCreator-darwin-amd64 tokenBoardCreator-darwin-arm64
+          zip tokenBoardCreator-darwin-amd64.zip tokenBoardCreator-darwin-amd64
+          zip tokenBoardCreator-darwin-arm64.zip tokenBoardCreator-darwin-arm64
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             tokenBoardCreator-windows-amd64.exe
-            tokenBoardCreator-darwin-amd64
-            tokenBoardCreator-darwin-arm64
+            tokenBoardCreator-darwin-amd64.zip
+            tokenBoardCreator-darwin-arm64.zip
             tokenBoardCreator-linux-amd64

@@ -25,6 +25,19 @@ go build .
 
 Requires Go 1.24+. The only runtime dependency is [`github.com/go-pdf/fpdf`](https://github.com/go-pdf/fpdf).
 
+### Prebuilt binaries
+
+Prebuilt binaries for macOS, Windows, and Linux are attached to each [GitHub Release](https://github.com/nmouse/tokenBoardCreator/releases). On macOS, download the `.zip` matching your Mac's chip — `tokenBoardCreator-darwin-arm64.zip` for Apple Silicon (M1/M2/M3/M4), `tokenBoardCreator-darwin-amd64.zip` for Intel — then unzip it.
+
+The binary isn't code-signed, so the first time you run it macOS Gatekeeper will block it ("cannot be opened because the developer cannot be verified", or "is damaged and can't be opened"). To allow it:
+
+```bash
+xattr -d com.apple.quarantine ./tokenBoardCreator-darwin-arm64   # use -amd64 on Intel Macs
+./tokenBoardCreator-darwin-arm64 --web
+```
+
+Or in Finder: right-click the binary → **Open** → **Open** again in the dialog that appears.
+
 ## CLI usage
 
 ```bash
